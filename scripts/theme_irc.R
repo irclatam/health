@@ -28,7 +28,7 @@ scale_fill_country   <- function(...) scale_fill_manual(values = pal_country, ..
 # Used for population pyramids and any chart encoding sex within a panel.
 # Rule 3 applies: second categorical variable within a facet → purpose-specific palette.
 
-pal_sex <- c(Women = "#C75B7A", Men = "#4A82B0")
+pal_sex <- c(Women = "#1B7F8A", Men = "#A3CDD4", Other = "grey50")
 
 scale_fill_sex   <- function(...) scale_fill_manual(values = pal_sex, ...)
 scale_colour_sex <- function(...) scale_colour_manual(values = pal_sex, ...)

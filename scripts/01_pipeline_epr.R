@@ -319,6 +319,14 @@ write_agg(agg_monthly_consultations, "agg_monthly_consultations.csv")
 
 # Chart 1.2 — Sex breakdown
 agg_sex_breakdown <- registro %>%
+  mutate(sexo = case_when(
+    is.na(sexo) ~ "Otro",
+    sexo == "I" ~ "Otro",
+    sexo == "NR" ~ "Otro",
+    sexo == "M" ~ "M",
+    sexo == "H" ~ "H",
+    TRUE ~ sexo
+  )) %>%
   filter(!is.na(sexo), !is.na(country)) %>%
   count(country, sex = sexo) %>%
   group_by(country) %>%
