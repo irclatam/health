@@ -47,3 +47,12 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+.positai
+
+# Data — never commit (raw, anonymised, or pipeline outputs)
+# Raw CommCare exports live in offline_folder/ outside this repo (PII)
+data_anonymised/
+data/
+
+/.quarto/
+**/*.quarto_ipynb
