@@ -2,7 +2,7 @@ project:
   type: website
   output-dir: docs
   render:
-    - dashboard.qmd
+    - index.qmd
 
 website:
   title: |
@@ -14,7 +14,7 @@ website:
     foreground: "#111111"
     left:
       - text: "Health Services Dashboard"
-        href: dashboard.qmd
+        href: index.qmd
 
 execute:
   echo: false

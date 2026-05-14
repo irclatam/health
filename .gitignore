@@ -40,7 +40,8 @@ vignettes/*.pdf
 .Renviron
 
 # pkgdown site
-docs/
+# docs/ — intentionally committed for GitHub Pages
+
 
 # translation temp files
 po/*~
@@ -61,6 +62,7 @@ scripts/check_usernames.R
 # Working documents — specs, lessons learned, archived prototypes
 irc_health_dashboard_spec_v*.md
 irc_commcare_rebuild_lessons.md
+pipeline.md
 archive/
 examples/
 data_structure/
