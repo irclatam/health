@@ -54,5 +54,19 @@ rsconnect/
 data_anonymised/
 data/
 
+# Anonymisation scripts — process raw PII, not for public repo
+scripts/00_anonymise_*.R
+scripts/check_usernames.R
+
+# Working documents — specs, lessons learned, archived prototypes
+irc_health_dashboard_spec_v*.md
+irc_commcare_rebuild_lessons.md
+archive/
+examples/
+data_structure/
+
+# Claude Code memory
+.claude/
+
 /.quarto/
 **/*.quarto_ipynb

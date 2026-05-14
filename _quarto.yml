@@ -1,0 +1,33 @@
+project:
+  type: website
+  output-dir: docs
+  render:
+    - dashboard.qmd
+
+website:
+  title: |
+    <a href="https://www.rescue.org" class="brand-logo">
+      <img src="IRC_LOGO_SECONDARY_HORIZONTAL_CMYK.jpg" alt="IRC">
+    </a>
+  navbar:
+    background: white
+    foreground: "#111111"
+    left:
+      - text: "Health Services Dashboard"
+        href: dashboard.qmd
+
+execute:
+  echo: false
+  warning: false
+  message: false
+  freeze: auto
+
+format:
+  html:
+    theme: cosmo
+    css: styles.css
+    toc: true
+    toc-location: right
+    toc-depth: 3
+    fig-format: png
+    fig-dpi: 150

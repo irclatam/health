@@ -1,5 +1,5 @@
 ---
-title: "IRC Latin America — Health Services Dashboard"
+title: "Health services data from IRC's Latin America programmes"
 ---
 
 ```{r setup}
@@ -11,6 +11,9 @@ library(rnaturalearth)
 library(rnaturalearthdata)
 library(tidytext)
 library(htmltools)
+library(patchwork)
+library(echarts4r)
+library(ggiraph)
 
 source("scripts/theme_irc.R")
 
@@ -22,29 +25,36 @@ last_updated_fmt <- paste0(
 )
 
 # ── Data loading ──────────────────────────────────────────────────────────────
+# Combined (Ecuador + Peru + Mexico)
+monthly <- read_csv("data/combined/agg_monthly_consultations.csv", show_col_types = FALSE)
+sex_bdown <- read_csv("data/combined/agg_sex_breakdown.csv", show_col_types = FALSE)
+pyramid <- read_csv("data/combined/agg_age_sex_pyramid.csv", show_col_types = FALSE)
+age_bdown <- read_csv("data/combined/agg_age_breakdown.csv", show_col_types = FALSE)
+loc_counts <- read_csv("data/combined/agg_location_consultations.csv", show_col_types = FALSE)
+aps_dx <- read_csv("data/combined/agg_aps_diagnoses.csv", show_col_types = FALSE)
+chronic <- read_csv("data/combined/agg_chronic_conditions.csv", show_col_types = FALSE)
+ssr_mix <- read_csv("data/combined/agg_ssr_service_mix.csv", show_col_types = FALSE)
+svc_sankey <- read_csv("data/combined/agg_service_sankey.csv", show_col_types = FALSE)
+aps_trend_ctry <- read_csv("data/combined/agg_aps_trend_ctry.csv", show_col_types = FALSE)
 
-monthly <- read_csv("data/agg_monthly_consultations.csv", show_col_types = FALSE)
-sex_bdown <- read_csv("data/agg_sex_breakdown.csv", show_col_types = FALSE)
-pyramid <- read_csv("data/agg_age_sex_pyramid.csv", show_col_types = FALSE)
-age_bdown <- read_csv("data/agg_age_breakdown.csv", show_col_types = FALSE)
-migration <- read_csv("data/agg_migration_profile.csv", show_col_types = FALSE)
-ethnicity <- read_csv("data/agg_ethnic_profile.csv", show_col_types = FALSE)
-nationality <- read_csv("data/agg_nationality.csv", show_col_types = FALSE)
-svc_dist <- read_csv("data/agg_services_per_client.csv", show_col_types = FALSE)
-svc_summary <- read_csv("data/agg_services_per_client_summary.csv", show_col_types = FALSE)
-loc_counts <- read_csv("data/agg_location_consultations.csv", show_col_types = FALSE)
-loc_coords <- read_csv("data/locations.csv", show_col_types = FALSE)
-aps_dx <- read_csv("data/agg_aps_diagnoses.csv", show_col_types = FALSE)
-aps_age <- read_csv("data/agg_aps_by_age.csv", show_col_types = FALSE)
-chronic <- read_csv("data/agg_chronic_conditions.csv", show_col_types = FALSE)
+# EPR-only (Ecuador & Peru)
+migration    <- read_csv("data/combined/agg_migration_profile.csv",  show_col_types = FALSE)
+ethnicity    <- read_csv("data/agg_ethnic_profile.csv",              show_col_types = FALSE)
+nationality  <- read_csv("data/combined/agg_nationality.csv",        show_col_types = FALSE)
+svc_dist     <- read_csv("data/combined/agg_services_per_client.csv",         show_col_types = FALSE)
+svc_summary  <- read_csv("data/combined/agg_services_per_client_summary.csv", show_col_types = FALSE)
 equity_dx <- read_csv("data/agg_equity_diagnoses.csv", show_col_types = FALSE)
-ssr_mix <- read_csv("data/agg_ssr_service_mix.csv", show_col_types = FALSE)
-its_results <- read_csv("data/agg_its_results.csv", show_col_types = FALSE)
-prenatal_age <- read_csv("data/agg_prenatal_age.csv", show_col_types = FALSE)
-cacu <- read_csv("data/agg_cacu_screening.csv", show_col_types = FALSE)
-mh_service <- read_csv("data/agg_mh_service_type.csv", show_col_types = FALSE)
-mh_dx <- read_csv("data/agg_mh_diagnoses.csv", show_col_types = FALSE)
-referrals <- read_csv("data/agg_referrals.csv", show_col_types = FALSE)
+its_results  <- read_csv("data/agg_its_results.csv",                 show_col_types = FALSE)
+prenatal_age <- read_csv("data/agg_prenatal_age.csv",                show_col_types = FALSE)
+mh_service <- read_csv("data/agg_mh_service_type.csv",         show_col_types = FALSE)
+mh_dx           <- read_csv("data/agg_mh_diagnoses.csv",            show_col_types = FALSE)
+mh_trend_ctry   <- read_csv("data/agg_mh_trend_ctry.csv",           show_col_types = FALSE)
+mh_equity_dx    <- read_csv("data/agg_mh_equity_diagnoses.csv",     show_col_types = FALSE)
+
+# Mexico-only
+pharma_mx <- read_csv("data/mx/agg_pharma_dispensed.csv", show_col_types = FALSE)
+
+loc_coords <- read_csv("data/locations.csv", show_col_types = FALSE)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -60,7 +70,8 @@ dx_lookup <- c(
   B86  = "Scabies",                   M545 = "Low back pain",
   Z308 = "Contraception care",        J029 = "Acute pharyngitis",
   K029 = "Dental caries",             K297 = "Gastritis",
-  J40  = "Bronchitis",                D509 = "Iron deficiency anaemia",
+  A099 = "Gastroenteritis & colitis", D509 = "Iron deficiency anaemia",
+  J40  = "Bronchitis",
   J459 = "Asthma",                    F99  = "Mental disorder, unspecified",
   Z659 = "Psychosocial problems",     Z639 = "Primary support group problem",
   F419 = "Anxiety disorder, unspecified", F320 = "Mild depressive episode",
@@ -80,6 +91,7 @@ label_dx <- function(code, label, maxlen = 30) {
 condition_labels <- c(sifilis = "Syphilis", vih = "HIV", hepatitis = "Hepatitis B")
 
 migration_labels <- c(
+  # EPR (Ecuador / Peru)
   poblacion_acogida                     = "Host community",
   migrante_en_transito                  = "Transit migrant",
   migrante_asentado                     = "Settled migrant",
@@ -87,46 +99,81 @@ migration_labels <- c(
   local_transito                        = "Local (in transit)",
   refugiado                             = "Refugee / asylum seeker",
   desplazado_interno                    = "Internally displaced",
-  retornado                             = "Returnee / deportee"
+  retornado                             = "Returnee / deportee",
+  # Mexico
+  mexicanoa                               = "Host community",
+  migrante_o_persona_en_movilidad_humana  = "Migrant / displaced",
+  solicitante_de_refugio                  = "Refugee applicant",
+  solicitante_de_asilo                    = "Asylum seeker",
+  persona_desplazada_interna              = "Internally displaced",
+  refugiadoa                              = "Refugee",
+  otra                                    = "Other"
 )
 
 nationality_labels <- c(
+  # EPR (Ecuador / Peru) — Spanish feminine gentilics
   ecuatoriana        = "Ecuadorian",
   venezolana         = "Venezuelan",
   peruana            = "Peruvian",
   colombiana         = "Colombian",
   otra_nacionalidad  = "Other",
-  doble_nacionalidad = "Dual"
+  doble_nacionalidad = "Dual",
+  # Mexico — raw country names
+  venezuela          = "Venezuelan",
+  mexico             = "Mexican",
+  colombia           = "Colombian",
+  honduras           = "Honduran",
+  guatemala          = "Guatemalan",
+  ecuador            = "Ecuadorian",
+  el_salvador        = "Salvadoran",
+  cuba               = "Cuban",
+  nicaragua          = "Nicaraguan",
+  haiti              = "Haitian"
 )
 
-pop_labels <- c(local_host = "Host community", migrant_refugee = "Migrants / refugees")
+pop_labels <- c(local_host = "Host", migrant_refugee = "Migrants")
 
 chronic_labels <- c(
-  hipertension = "Hypertension",
-  diabetes     = "Diabetes",
-  otro_cronico = "Other chronic",
-  cancer       = "Cancer",
-  cardiopatias = "Cardiac disease",
-  acv          = "Stroke (ACV)",
-  epoc         = "COPD"
+  hipertension   = "Hypertension",
+  diabetes       = "Diabetes",
+  otro_cronico   = "Other chronic",
+  cardiovascular = "Cardiovascular disease",
+  cancer         = "Cancer",
+  cardiopatias   = "Cardiac disease",
+  acv            = "Stroke (ACV)",
+  epoc           = "COPD"
 )
 
 # ── Headline stats ────────────────────────────────────────────────────────────
 
-n_clients_total   <- loc_counts %>% summarise(n = sum(n_clients)) %>% pull(n)
-n_clients_ecu     <- loc_counts %>% filter(country == "ecuador") %>% summarise(n = sum(n_clients)) %>% pull(n)
-n_clients_per     <- loc_counts %>% filter(country == "peru")    %>% summarise(n = sum(n_clients)) %>% pull(n)
+n_clients_total  <- loc_counts %>% summarise(n = sum(n_clients)) %>% pull(n)
+n_clients_ecu    <- loc_counts %>% filter(country == "ecuador") %>% summarise(n = sum(n_clients)) %>% pull(n)
+n_clients_per    <- loc_counts %>% filter(country == "peru")    %>% summarise(n = sum(n_clients)) %>% pull(n)
+n_clients_mex    <- loc_counts %>% filter(country == "mexico")  %>% summarise(n = sum(n_clients)) %>% pull(n)
 
-n_services_total  <- monthly %>% pull(n_consultations) %>% sum()
-n_services_ecu    <- monthly %>% filter(country == "ecuador") %>% pull(n_consultations) %>% sum()
-n_services_per    <- monthly %>% filter(country == "peru")    %>% pull(n_consultations) %>% sum()
+n_services_total <- monthly %>% pull(n_consultations) %>% sum()
+n_services_ecu   <- monthly %>% filter(country == "ecuador") %>% pull(n_consultations) %>% sum()
+n_services_per   <- monthly %>% filter(country == "peru")    %>% pull(n_consultations) %>% sum()
+n_services_mex   <- monthly %>% filter(country == "mexico")  %>% pull(n_consultations) %>% sum()
+
+n_mex_peak_monthly <- monthly %>%
+  filter(country == "mexico") %>%
+  pull(n_consultations) %>%
+  max()
 
 pct_under18 <- age_bdown %>%
   filter(age_band %in% c("0-5","6-11","12-17")) %>%
   summarise(pct = sum(n) / sum(age_bdown$n)) %>% pull(pct)
 
+pct_female <- sex_bdown %>%
+  group_by(sex) %>%
+  summarise(n = sum(n), .groups = "drop") %>%
+  mutate(pct = n / sum(n)) %>%
+  filter(sex == "M") %>%
+  pull(pct)
+
 pct_prenatal_under18 <- prenatal_age %>%
-  mutate(is_u18 = age_band %in% c("0-5","6-11","12-17")) %>%
+  mutate(is_u18 = age_band %in% c("<10", "10-14", "15-17")) %>%
   summarise(pct = sum(n[is_u18]) / sum(n)) %>% pull(pct)
 
 syphilis_positivity <- its_results %>%
@@ -135,42 +182,79 @@ syphilis_positivity <- its_results %>%
 
 mean_svc_ecu <- svc_summary %>% filter(country == "ecuador") %>% pull(mean_services)
 mean_svc_per <- svc_summary %>% filter(country == "peru")    %>% pull(mean_services)
+mean_svc_mex <- svc_summary %>% filter(country == "mexico")  %>% pull(mean_services)
 pct_one_ecu  <- svc_summary %>% filter(country == "ecuador") %>% pull(pct_one_service)
 pct_one_per  <- svc_summary %>% filter(country == "peru")    %>% pull(pct_one_service)
+pct_one_mex  <- svc_summary %>% filter(country == "mexico")  %>% pull(pct_one_service)
+
+pct_mex_migrants <- migration %>%
+  filter(country == "mexico") %>%
+  summarise(pct = 1 - sum(n[migration_profile == "mexicanoa"]) / sum(n)) %>%
+  pull(pct)
 
 # ── Value box helper ──────────────────────────────────────────────────────────
-# Renders Bootstrap stat cards. `accent` is the top-border colour.
 
-stat_box <- function(value, label, sub = NULL, accent = "#444444") {
+col_rgba <- function(hex, alpha = 0.15) {
+  r <- strtoi(substr(hex, 2, 3), 16L)
+  g <- strtoi(substr(hex, 4, 5), 16L)
+  b <- strtoi(substr(hex, 6, 7), 16L)
+  sprintf("rgba(%d,%d,%d,%.2f)", r, g, b, alpha)
+}
+
+vbox <- function(label, primary, subline = NULL, bg = "#FFFFFF") {
   div(
-    class = "col",
-    div(
-      class = "card h-100 text-center p-3",
-      style = paste0("border-top: 4px solid ", accent, "; border-radius: 6px;"),
-      div(class = "fw-bold mb-1",
-          style = paste0("font-size: 1.8rem; color: ", accent, ";"),
-          value),
-      div(class = "text-muted", style = "font-size: 0.85rem; line-height: 1.3;", label),
-      if (!is.null(sub)) div(class = "text-muted mt-1",
-                             style = "font-size: 0.75rem;", sub)
-    )
+    style = paste0("background:", bg, ";border-radius:6px;border:1px solid #E8E8E8;box-shadow:0 1px 3px rgba(0,0,0,0.05);padding:18px 20px;flex:1;min-width:160px;"),
+    div(style = "font-size:14px;font-weight:600;color:#333;margin-bottom:10px;", label),
+    div(style = "font-family:'Roboto Mono',monospace;font-size:28px;font-weight:700;color:#1B7F8A;line-height:1.1;margin-bottom:7px;", primary),
+    if (!is.null(subline)) div(style = "font-size:12px;color:#555;line-height:1.5;", subline)
   )
 }
 
-stat_row <- function(...) div(class = "row row-cols-2 row-cols-md-4 g-3 mb-4", ...)
+vbox_row <- function(...) {
+  div(style = "display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap;", ...)
+}
+
+# ── Service and diagnosis colour palettes ─────────────────────────────────────
+col_aps <- "#1B7F8A"
+col_ssr <- "#7570B3"
+col_mh <- "#E7298A"
+col_sub <- "#777777"
+
+# Diagnosis ramps — light-to-dark within each service colour family
+pal_aps_dx <- colorRampPalette(c("#92D8DC", col_aps, "#082C30"))(12)
+pal_mh_dx <- colorRampPalette(c("#F7BDD9", col_mh,  "#5A0A32"))(12)
 ```
 
-`r last_updated_fmt`
+------------------------------------------------------------------------
 
----
+```{=html}
+<div style="background:#f0f7ff;border-left:4px solid #005eb8;border-radius:4px;padding:14px 18px;margin:16px 0;font-family:Inter,sans-serif;font-size:15px;line-height:1.6;">
+Since mid-2024, IRC health teams in Ecuador, Peru, and Mexico have delivered
+<strong>`r comma(n_services_total)`</strong> individual health services to
+<strong>`r comma(n_clients_total)`</strong> clients.
+Respiratory infections and parasitosis dominate the primary care caseload;
+migrant clients show markedly higher rates of acute stress and ITS compared to host communities.
+</div>
+```
 
-## Geographic overview
+The IRC has been delivering health programmes across Latin America since 2019. Since 2024, the IRC has been running consultations with clients in Ecuador, Peru, and Mexico, recording data on each encounter through a purpose-built health information system. While the IRC's first priority is quality care, not data collection, these records make it possible to track caseloads, identify equity gaps, and understand how health needs are evolving across the populations we serve.
 
-Where IRC health services are being provided. Bubble size is proportional to total registered clients at each location.
+This factsheet presents those findings. One important caveat: everything here reflects what we see among IRC clients specifically — people who reached one of our clinics. It does not describe the broader population. The picture is shaped by who we are able to reach, not only by who needs care.
+
+## Where does the IRC work?
+
+IRC health services are concentrated in urban centres along migration corridors and displacement-affected border areas. Each bubble on the map below represents one IRC service location; its size reflects the number of clients who registered *and* received at least one consultation. Locations where clients registered but never returned for a service are not shown.
+
+#### Figure 1. The distribution of clients around Latin America
+
+::: {.chart-sub}
+Map · bubble size = registered clients with at least one consultation
+:::
 
 ```{r chart-0-1}
-#| fig-width: 9
+#| fig-width: 12
 #| fig-height: 6.5
+#| out-width: "100%"
 
 map_data <- loc_counts %>%
   left_join(select(loc_coords, municipio, lat, lon), by = "municipio") %>%
@@ -178,73 +262,232 @@ map_data <- loc_counts %>%
   mutate(country_label = label_country(country))
 
 region_sf <- ne_countries(
-  continent = "South America", scale = "medium", returnclass = "sf"
+  continent = c("South America", "North America"), scale = "medium", returnclass = "sf"
 )
 locs_sf <- st_as_sf(map_data, coords = c("lon", "lat"), crs = 4326)
 
+# Compute xlim so the map fills exactly the figure width.
+# coord_sf (geographic CRS) aspect: panel_w/panel_h = lon_range / (lat_range / cos(mean_lat))
+# legend (~0.35in) + caption (~0.25in) + margins (~0.2in) consume ~0.8in of fig-height.
+map_fig_w    <- 12
+map_fig_h    <- 6.5
+map_ylim     <- c(-22, 38)
+lat_range    <- diff(map_ylim)
+mean_lat_rad <- mean(map_ylim) * pi / 180
+panel_h      <- map_fig_h - 0.8   # subtract non-panel vertical space
+lon_range    <- (map_fig_w / panel_h) * (lat_range / cos(mean_lat_rad))
+lon_center   <- -91                # approximate centre between Ciudad Juárez and Lima
+map_xlim     <- c(lon_center - lon_range / 2, lon_center + lon_range / 2)
+
 ggplot() +
   geom_sf(data = region_sf, fill = "grey94", colour = "grey72", linewidth = 0.2) +
-  geom_sf(data = locs_sf,
-          aes(size = n_clients, colour = country_label),
-          alpha = 0.75) +
+  geom_sf(
+    data = locs_sf,
+    aes(size = n_clients, colour = country_label),
+    alpha = .6
+  ) +
   scale_size_area(max_size = 18, guide = "none") +
   scale_colour_country(name = NULL) +
-  coord_sf(xlim = c(-90, -60), ylim = c(-15, 5.0), expand = FALSE, datum = NA) +
-  labs(caption = "Bubble size = total registered clients. Municipality centroids.") +
+  coord_sf(xlim = map_xlim, ylim = map_ylim, expand = FALSE) +
   theme_irc() +
   theme(
-    axis.text  = element_blank(),
+    axis.text.x  = element_blank(),
+    axis.text.y  = element_blank(),
     axis.ticks = element_blank(),
-    axis.title = element_blank(),
-    panel.grid = element_blank(),
-    legend.position = "bottom"
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    legend.position = "top",
+    legend.text = element_text(size = 14)
   )
 ```
 
----
+------------------------------------------------------------------------
 
 ## Clients
 
 ```{r clients-value-boxes}
 #| output: asis
-stat_row(
-  stat_box(comma(n_clients_total), "Total registered clients",
-           accent = "#444444"),
-  stat_box(comma(n_clients_ecu),   "Registered in Ecuador",
-           sub = "84% Ecuadorian nationals", accent = pal_country["Ecuador"]),
-  stat_box(comma(n_clients_per),   "Registered in Peru",
-           sub = "55% Venezuelan nationals", accent = pal_country["Peru"]),
-  stat_box(percent(pct_under18, accuracy = 1), "Under 18",
-           sub = "across both countries", accent = "#E53935")
+vbox_row(
+  vbox("Total clients", comma(n_clients_total)),
+  vbox("Female", percent(pct_female,   accuracy = 1)),
+  vbox("Under 18", percent(pct_under18,  accuracy = 1))
+)
+vbox_row(
+  vbox(
+    "Ecuador \U0001F1EA\U0001F1E8",
+    comma(n_clients_ecu),
+    "84% Ecuadorian nationals",
+    bg = col_rgba(pal_country["Ecuador"])
+  ),
+  vbox(
+    "Peru \U0001F1F5\U0001F1EA",
+    comma(n_clients_per),
+    "55% Venezuelan nationals",
+    bg = col_rgba(pal_country["Peru"])
+  ),
+  vbox(
+    "Mexico \U0001F1F2\U0001F1FD",
+    comma(n_clients_mex),
+    paste0(percent(pct_mex_migrants, accuracy = 1), " migrants / displaced"),
+    bg = col_rgba(pal_country["Mexico"])
+  )
 )
 ```
 
-### Consultations over time
+All three programmes have grown since their respective launches, but with distinct patterns. Ecuador is relatively stable — a mature programme serving a settled population. Peru is more variable month to month, consistent with a transit corridor where caseload fluctuates with migration flows. Mexico is the newest programme and has the least historical data.
 
-```{r chart-1-1}
+Use the tabs below to compare trend lines side by side, or to view a stacked area chart that shows the combined regional total.
+
+#### Figure 2. How has the caseload changed over time?
+
+::: {.chart-sub}
+Line chart · monthly consultations per country, with stacked regional total
+:::
+
+```{r chart-1-1-data}
+monthly_clean <- monthly %>%
+  mutate(
+    date    = ym(year_month),
+    country = label_country(country)
+  ) %>%
+  filter(
+    date >= PROJECT_START,
+  ) %>%
+  select(date, country, n_consultations) %>%
+  complete(date, country, fill = list(n_consultations = 0)) %>%
+  filter(
+    !(date < ymd("2025-02-01") & country == "Mexico"),
+    !(date > ymd("2026-04-01"))
+  ) %>%
+  mutate(country = factor(country, levels = c("Ecuador", "Peru", "Mexico")))
+
+monthly_max_date <- max(monthly_clean$date)
+monthly_label_x  <- monthly_max_date + 30
+
+monthly_x_breaks <- seq(
+  from = floor_date(min(monthly_clean$date), "quarter"),
+  to   = ceiling_date(monthly_max_date, "quarter"),
+  by   = "3 months"
+)
+monthly_x_limits <- range(monthly_x_breaks)
+
+# Y-axis limits driven by stacked total so both tabs share the same scale
+monthly_y_breaks <- pretty(
+  c(0, monthly_clean %>%
+       group_by(date) %>%
+       summarise(total = sum(n_consultations), .groups = "drop") %>%
+       pull(total) %>%
+       max()),
+  n = 5
+)
+monthly_y_max <- max(monthly_y_breaks)
+
+monthly_ends <- monthly_clean %>%
+  group_by(country) %>%
+  slice_max(date, n = 1) %>%
+  ungroup() %>%
+  mutate(end_label = comma(n_consultations))
+```
+
+::: {.panel-tabset}
+
+## Trend lines for total clients
+
+```{r chart-1-1a}
 #| fig-width: 9
 #| fig-height: 4
 
-monthly_clean <- monthly %>%
-  mutate(date = ym(year_month),
-         country = label_country(country)) %>%
-  filter(date >= PROJECT_START)
-
-ggplot(monthly_clean, aes(x = date, y = n_consultations, colour = country)) +
+monthly_clean %>%
+  ggplot(aes(x = date, y = n_consultations, colour = country)) +
   geom_line(linewidth = 0.8, alpha = 0.85) +
-  geom_point(size = 1.8, alpha = 0.85) +
+  ggrepel::geom_text_repel(
+    data          = monthly_ends,
+    aes(label     = end_label),
+    hjust         = 0,
+    nudge_x       = 30,
+    xlim          = c(monthly_label_x, NA),
+    direction     = "y",
+    force_pull    = 0,
+    size          = 3.4,
+    family        = "Inter",
+    fontface      = "bold",
+    segment.size  = 0.3,
+    segment.color = "grey70",
+    show.legend   = FALSE
+  ) +
   scale_colour_country() +
-  scale_x_date(date_labels = "%b %Y", date_breaks = "2 months") +
-  scale_y_continuous(labels = comma, limits = c(0, NA)) +
-  labs(x = NULL, y = "Consultations", colour = NULL) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  scale_x_date(
+    breaks      = monthly_x_breaks,
+    limits      = monthly_x_limits,
+    date_labels = "%b '%y",
+    expand      = expansion(mult = c(0.02, 0.02))
+  ) +
+  scale_y_continuous(
+    labels = comma,
+    breaks = monthly_y_breaks,
+#    limits = c(0, monthly_y_max)
+  ) +
+  labs(x = NULL, y = NULL, colour = NULL) +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(family = "Inter", size = 12),
+    axis.text.y = element_text(family = "Roboto Mono", size = 12),
+    legend.text = element_text(size = 12)
+  )
 ```
 
-### Sex breakdown
+## Stacked lines showing total for region
 
-```{r chart-1-2}
-#| fig-width: 8
-#| fig-height: 3
+```{r chart-1-1b}
+#| fig-width: 9
+#| fig-height: 4
+
+monthly_clean %>%
+  mutate(country = fct_rev(country)) %>%
+  ggplot(aes(x = date, y = n_consultations, fill = country, colour = country)) +
+  geom_area(
+    position  = "stack",
+    alpha     = 0.4,
+    linewidth = 0.8
+  ) +
+  scale_fill_country() +
+  scale_colour_country() +
+  scale_x_date(
+    breaks      = monthly_x_breaks,
+    limits      = monthly_x_limits,
+    date_labels = "%b '%y",
+    expand      = expansion(mult = c(0.02, 0.02))
+  ) +
+  scale_y_continuous(
+    labels = comma,
+    breaks = monthly_y_breaks,
+    limits = c(0, monthly_y_max)
+  ) +
+  labs(x = NULL, y = NULL, fill = NULL, colour = NULL) +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(family = "Inter", size = 12),
+    axis.text.y = element_text(family = "Roboto Mono", size = 12),
+    legend.text = element_text(size = 12)
+  )
+```
+
+:::
+
+Women make up the large majority of registered clients in all three countries — a pattern driven by the weight of prenatal and sexual and reproductive health services in the caseload. Men are underrepresented relative to their share of the affected population, which is common in humanitarian health programming where male engagement in preventive and reproductive care tends to be lower.
+
+`r percent(pct_under18, accuracy = 1)` of all registered clients are under 18. The age profile across all three countries skews young, with a working-age peak in the 20–34 band — consistent with a caseload that spans mobile migrant adults and their children. Peru's pyramid is narrower in the older age groups, reflecting a migrant population concentrated among working-age adults, while Ecuador's broader shape reflects its mixed host-community and migrant caseload.
+
+The dot chart below shows the male/female split by country (other genders account for around 0.3% of clients and are not displayed separately). The population pyramids break this down by five-year age band. Note that Peru and Mexico tend to see more children under 10 than Ecuador, and that in Ecuador the majority of male clients are minors — suggesting adult men primarily access services for their children rather than for themselves.
+
+#### Figure 3. Who are our clients? Sex and age profile
+
+::: {.chart-sub}
+Dot chart and population pyramid · sex split and five-year age bands by country
+:::
+```{r chart-1-2-3}
+#| fig-width: 13
+#| fig-height: 7
 
 sex_labels <- c(H = "Men", M = "Women", I = "Intersex", NR = "Prefer not to say", Otro = "Other")
 
@@ -255,37 +498,30 @@ sex_plot <- sex_bdown %>%
     country   = label_country(country),
     pct_label = str_c(round(pct * 100, 1), "%")
   ) %>%
-  filter(sex_label != "Other")
+  filter(sex_label %in% c("Men", "Women"))
 
-ggplot(sex_plot, aes(x = sex_label, y = 1, colour = sex_label)) +
-#  geom_col(alpha = 0.8) +
+p_sex <- ggplot(sex_plot, aes(x = sex_label, y = 1, colour = sex_label)) +
   geom_point(aes(size = pct)) +
-#  geom_text(aes(label = pct_label), colour = "black", size = 3) +
-  geom_text(data = filter(sex_plot, sex_label == "Women"), 
-            aes(label = pct_label), colour = "white", size = 3.5) +
-  geom_text(data = filter(sex_plot, sex_label == "Men"), 
-            aes(label = pct_label), colour = "black", size = 3.5) +
-#  facet_wrap(~ country, ncol = 2) +
+  geom_text(
+    data = filter(sex_plot, sex_label == "Women"),
+    aes(label = pct_label), colour = "white", size = 4.5
+  ) +
+  geom_text(
+    data = filter(sex_plot, sex_label == "Men"),
+    aes(label = pct_label), colour = text_colour, size = 4.5
+  ) +
   facet_grid(cols = vars(country)) +
-#  scale_x_continuous(labels = percent_format(accuracy = 1), limits = c(0, 1)) +
   scale_colour_sex() +
-  scale_size_area(max_size = 30, guide = "none") +
+  scale_size_area(max_size = 45, guide = "none") +
   labs(x = NULL, y = NULL) +
   theme(
-    legend.position = "top",
-    axis.text.y = element_blank(),
+    legend.position = "none",
     axis.text.x = element_blank(),
-    panel.grid.major = element_blank()
+    axis.text.y = element_blank(),
+    panel.grid.major = element_blank(),
+    plot.margin = margin(t = 5, r = 5, b = 0, l = 5),
+    strip.text = element_text(size = 14)
   )
-```
-
-### Age and sex distribution
-
-`r percent(pct_under18, accuracy = 1)` of all registered clients are under 18.
-
-```{r chart-1-3}
-#| fig-width: 9
-#| fig-height: 5.5
 
 age_bands_5yr  <- c("0-4","5-9","10-14","15-19","20-24","25-29",
                     "30-34","35-39","40-44","45-49","50-54","55-59","60-64","65+")
@@ -301,135 +537,224 @@ pyramid_plot <- pyramid %>%
   )
 x_limit <- max(abs(pyramid_plot$value)) * 1.08
 
-ggplot(pyramid_plot, aes(x = value, y = age_5yr, fill = sex_label)) +
+p_pyr <- ggplot(pyramid_plot, aes(x = value, y = age_5yr, fill = sex_label)) +
   geom_col(alpha = 0.85) +
-  facet_wrap(~ country, ncol = 2) +
-  scale_x_continuous(limits = c(-x_limit, x_limit),
-                     labels = function(x) percent(abs(x), accuracy = 0.1)) +
+  facet_grid(cols = vars(country)) +
+  scale_x_continuous(
+    limits = c(-x_limit, x_limit),
+    breaks = c(-.1, -.05, 0, .05, .1),
+    labels = function(x) percent(abs(x), accuracy = 1)
+  ) +
   scale_y_discrete(labels = age_labels_5yr) +
   scale_fill_sex() +
-  labs(x = NULL, y = NULL, fill = NULL,
-       caption = "% of total clients by sex. Intersex and prefer-not-to-say excluded (< 0.1% combined).") +
-  theme(legend.position = "top")
+  labs(x = NULL, y = NULL, fill = NULL) +
+  theme(
+    legend.position  = "bottom",
+    legend.text      = element_text(size = 16),
+    legend.margin    = margin(t = 14),
+    strip.text       = element_blank(),
+    axis.text        = element_text(size = 16),
+    plot.margin      = margin(t = 0, r = 5, b = 5, l = 5)
+  )
+
+p_sex / p_pyr + plot_layout(heights = c(2, 5))
 ```
 
-### Migration profile
+The three countries represent three distinct programme models. Ecuador is predominantly a host-community programme: most clients are settled Ecuadorian nationals accessing care they might otherwise struggle to reach. Peru is a transit corridor — most clients are Venezuelan migrants on the move, passing through rather than settling. Mexico sits between the two: roughly a third of clients are Mexican nationals, but the majority are migrants or people in displacement, many of them Venezuelan, Honduran, or Guatemalan, reflecting Ciudad Juárez's position on the US border. These differences shape everything downstream: the clinical picture, the service design, and how often a client returns for follow-up.
 
-Ecuador's clients are predominantly host community (77%); Peru's are predominantly transit migrants (69%) — reflecting fundamentally different programme contexts.
+#### Figure 4. Where are clients coming from?
 
+::: {.chart-sub}
+Dot chart · migration profile by country
+:::
 ```{r chart-1-4}
-#| fig-width: 9
-#| fig-height: 4.5
+#| fig-width: 13
+#| fig-height: 4
+
+migration_collapsed <- c(
+  poblacion_acogida                      = "Host community",
+  mexicanoa                              = "Host community",
+  migrante_en_transito                   = "Transit migrant",
+  local_transito                         = "Transit migrant",
+  migrante_o_persona_en_movilidad_humana = "Transit migrant",
+  migrante_asentado                      = "Settled migrant",
+  "migrante_con_vocacin_de_permanencia"  = "Settled migrant",
+  refugiado                              = "Refugee / asylum seeker",
+  refugiadoa                             = "Refugee / asylum seeker",
+  solicitante_de_refugio                 = "Refugee / asylum seeker",
+  solicitante_de_asilo                   = "Refugee / asylum seeker",
+  desplazado_interno                     = "Displaced",
+  persona_desplazada_interna             = "Displaced",
+  retornado                              = "Other",
+  otra                                   = "Other"
+)
+
+cat_order <- c("Host community", "Transit migrant", "Settled migrant",
+               "Refugee / asylum seeker", "Displaced", "Other")
 
 migration_plot <- migration %>%
   mutate(
-    profile_label = coalesce(migration_labels[migration_profile], migration_profile),
-    country       = label_country(country)
+    profile_label = factor(
+      coalesce(migration_collapsed[migration_profile], "Other"),
+      levels = cat_order
+    ),
+    country   = label_country(country)
   ) %>%
+  group_by(country, profile_label) %>%
+  summarise(n = sum(n), .groups = "drop") %>%
   group_by(country) %>%
-  mutate(profile_label = reorder(profile_label, pct)) %>%
+  mutate(
+    pct       = n / sum(n),
+    pct_label = if_else(pct < 0.005, "< 1%", str_c(round(pct * 100, 0), "%"))
+  ) %>%
   ungroup()
 
-ggplot(migration_plot, aes(x = pct, y = profile_label, fill = country)) +
+ggplot(migration_plot, aes(x = pct, y = fct_rev(profile_label), fill = country)) +
   geom_col(alpha = 0.85) +
-  facet_wrap(~ country, ncol = 2, scales = "free_y") +
+  geom_text(aes(label = pct_label), hjust = -0.15, colour = text_colour, size = 4.5) +
+  facet_wrap(~ country, ncol = 3) +
   scale_fill_country(guide = "none") +
-  scale_x_continuous(labels = percent_format(accuracy = 1)) +
-  labs(x = NULL, y = NULL)
+  scale_x_continuous(
+    labels = percent_format(accuracy = 1),
+    expand = expansion(mult = c(0, 0.22))
+  ) +
+  labs(x = NULL, y = NULL) +
+  theme(
+    axis.text.x = element_text(size = 14),
+    axis.text.y = element_text(size = 14),
+    strip.text = element_text(size = 16)
+  )
 ```
 
-### Ethnic profile
+Ecuador serves predominantly its own nationals (84%) alongside Venezuelan and Colombian migrants. Peru's caseload is majority Venezuelan (55%), reflecting its role as a transit country in the regional displacement crisis. Mexico's caseload — centred on Ciudad Juárez and Mexico City — is split almost evenly between Mexican nationals and Venezuelan migrants, with significant numbers of Hondurans and Guatemalans reflecting Mexico's position as both a destination and a transit corridor. The ethnic profile is largely mestizo in Ecuador and Peru. Ethnicity is not collected in Mexico. Indigenous clients make up a small but meaningful share in Ecuador, concentrated in highland and border communities. Hover over the dots to see the counts behind each percentage.
 
-```{r chart-1-5}
-#| fig-width: 8
+#### Figure 5. Client nationality and ethnic background
+
+::: {.chart-sub}
+Dot chart · top nationalities and ethnicity by country — hover for counts
+:::
+```{r chart-1-5-6}
+#| fig-width: 10
 #| fig-height: 4
 
-pct_indigena <- ethnicity %>%
-  filter(ethnic_profile == "indigena") %>%
-  summarise(pct = sum(n) / sum(ethnicity$n)) %>% pull(pct)
+# ── Nationality ───────────────────────────────────────────────────────────────
+# Keep top 5 nationalities per country by volume; collapse the rest to "Other"
+nat_top5 <- nationality %>%
+  mutate(nat_label = coalesce(nationality_labels[nacionalidad], str_to_title(nacionalidad))) %>%
+  group_by(country, nat_label) %>%
+  summarise(n = sum(n), .groups = "drop") %>%
+  group_by(country) %>%
+  slice_max(n, n = 5) %>%
+  ungroup() %>%
+  select(country, nat_label)
 
-ethnic_labels <- c(
-  mestizo                 = "Mestizo",
-  indigena                = "Indigenous",
-  afrodescendiente        = "Afro-descendant",
-  caucsico                = "White",
-  sin_autorreconocimiento = "Other",
-  montubio                = "Montubio",
-  otro_ee                 = "Other",
-  otro_ep                 = "Other"
-)
-
-ethnic_plot <- ethnicity %>%
+nat_clean <- nationality %>%
+  mutate(nat_label = coalesce(nationality_labels[nacionalidad], str_to_title(nacionalidad))) %>%
+  group_by(country, nat_label) %>%
+  summarise(n = sum(n), .groups = "drop") %>%
+  left_join(nat_top5 %>% mutate(keep = TRUE), by = c("country", "nat_label")) %>%
+  mutate(nat_label = if_else(is.na(keep), "Other", nat_label)) %>%
+  group_by(country, nat_label) %>%
+  summarise(n = sum(n), .groups = "drop") %>%
+  group_by(country) %>%
   mutate(
-    ethnic_label = coalesce(ethnic_labels[ethnic_profile], ethnic_profile),
-    ethnic_label = case_when(
-      ethnic_label %in% c("Other", "No self-identification", "Unknown") ~ "Other",
-      TRUE ~ ethnic_label
+    pct       = n / sum(n),
+    country   = label_country(country)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    nat_label = reorder(nat_label, if_else(nat_label == "Other", -Inf, pct)),
+    tooltip   = paste0(
+      "<b>", nat_label, "</b><br>",
+      country, "<br>",
+      comma(n), " clients · ", percent(pct, accuracy = 1)
+    )
+  )
+
+p_nat <- ggplot(nat_clean, aes(x = pct, y = nat_label, colour = country)) +
+  geom_line(aes(group = nat_label), colour = "grey75", linewidth = 0.5) +
+  geom_point_interactive(
+    aes(tooltip = tooltip, data_id = paste(country, nat_label)),
+    size = 4, alpha = 0.85
+  ) +
+  scale_colour_country(name = NULL) +
+  scale_x_continuous(
+    labels = percent_format(accuracy = 1),
+    expand = expansion(mult = c(0.02, 0.15))
+  ) +
+  labs(x = NULL, y = NULL, title = "Nationality") +
+  theme(
+    axis.text.x = element_text(size = 14),
+    axis.text.y = element_text(size = 14)
+  )
+
+# ── Ethnicity ─────────────────────────────────────────────────────────────────
+eth_clean <- ethnicity %>%
+  mutate(
+    eth_label = case_when(
+      ethnic_profile == "mestizo"          ~ "Mestizo",
+      ethnic_profile == "indigena"         ~ "Indigenous",
+      ethnic_profile == "afrodescendiente" ~ "Afro-descendant",
+      TRUE                                 ~ "Other"
     ),
     country = label_country(country)
   ) %>%
-  group_by(country, ethnic_label) %>%
-  summarise(n = sum(n), pct = sum(pct), .groups = "drop") %>%
+  group_by(country, eth_label) %>%
+  summarise(n = sum(n), .groups = "drop") %>%
   group_by(country) %>%
+  mutate(pct = n / sum(n)) %>%
+  ungroup() %>%
   mutate(
-#    ethnic_label = reorder(ethnic_label, pct),
-    pct_label = str_c(round(pct * 100, 1), "%")
-  ) %>%
-  ungroup()
-
-ggplot(ethnic_plot, aes(x = pct, y = ethnic_label, fill = country)) +
-  geom_col(alpha = .8) +
-  geom_text(
-    aes(label = pct_label),
-    hjust = -0.3,
-    colour = "black", size = 3
-  ) +
-  facet_grid(cols = vars(country)) +
-  scale_fill_country(guide = "none") +
-  scale_x_continuous(
-    labels = percent_format(accuracy = 1),
-    expand = expansion(mult = c(0, 0.2))
-  ) +
-  labs(x = NULL, y = NULL)
-```
-
-### Nationality
-
-Ecuador is predominantly serving its own nationals (84%) alongside Venezuelan and Colombian migrants. Peru's caseload is majority Venezuelan (55%), reflecting its role as a transit corridor.
-
-```{r chart-1-6}
-#| fig-width: 8
-#| fig-height: 4
-
-nat_plot <- nationality %>%
-  mutate(
-    nat_label = coalesce(nationality_labels[nacionalidad], nacionalidad),
-    country   = label_country(country),
-    pct_label = str_c(round(pct * 100, 1), "%")
+    eth_label = reorder(eth_label, pct),
+    tooltip   = paste0(
+      "<b>", eth_label, "</b><br>",
+      country, "<br>",
+      comma(n), " clients · ", percent(pct, accuracy = 1)
+    )
   )
 
-ggplot(nat_plot, aes(x = pct, y = nat_label, fill = country)) +
-  geom_col(alpha = .8) +
-  geom_text(
-    aes(label = pct_label),
-    hjust = -0.3,
-    colour = "black", size = 3
+p_eth <- ggplot(eth_clean, aes(x = pct, y = eth_label, colour = country)) +
+  geom_line(aes(group = eth_label), colour = "grey75", linewidth = 0.5) +
+  geom_point_interactive(
+    aes(tooltip = tooltip, data_id = paste(country, eth_label)),
+    size = 4, alpha = 0.85
   ) +
-  facet_grid(cols = vars(country)) +
-  scale_fill_country(guide = "none") +
+  scale_colour_country(name = NULL) +
   scale_x_continuous(
     labels = percent_format(accuracy = 1),
-    expand = expansion(mult = c(0, 0.3))
+    expand = expansion(mult = c(0.02, 0.15))
   ) +
-  labs(x = NULL, y = NULL)
+  labs(x = NULL, y = NULL, title = "Ethnicity (Ecuador & Peru only)") +
+  theme(
+    axis.text.x = element_text(size = 14),
+    axis.text.y = element_text(size = 14)
+  )
+
+girafe(
+  ggobj = p_nat + p_eth +
+    plot_layout(guides = "collect") &
+    theme(legend.position = "bottom"),
+  width_svg  = 10,
+  height_svg = 4,
+  options    = list(
+    opts_hover(css = "opacity:1;"),
+    opts_hover_inv(css = "opacity:0.25;"),
+    opts_tooltip(
+      css = "background:white;border:1px solid #ccc;border-radius:4px;padding:8px 10px;font-family:Inter,sans-serif;font-size:13px;line-height:1.5;"
+    )
+  )
+)
 ```
 
-### Services per client
+`r percent(pct_one_ecu, accuracy = 1)` of Ecuador clients, `r percent(pct_one_per, accuracy = 1)` of Peru clients, and `r percent(pct_one_mex, accuracy = 1)` of Mexico clients received only a single service in the period covered. Peru's higher return rate — an average of `r mean_svc_per` services per client — is consistent with a transit setting where clients may remain for weeks and access multiple services. Ecuador and Mexico are closer to a first-contact, onward-referral model, with means of `r mean_svc_ecu` and `r mean_svc_mex` services respectively. A high proportion of single-service clients is not a failure of retention — it may simply reflect a programme doing exactly what it is designed to do.
 
-`r percent(pct_one_ecu, accuracy = 1)` of Ecuador clients and `r percent(pct_one_per, accuracy = 1)` of Peru clients received only a single service. Peru's higher return rate (mean `r mean_svc_per` vs `r mean_svc_ecu` in Ecuador) is consistent with a more complex caseload in a transit setting.
+#### Figure 6. Do clients access multiple services from the IRC (and partners)?
 
+::: {.chart-sub}
+Distribution chart · number of services received per client, by country
+:::
 ```{r chart-1-7}
-#| fig-width: 8
+#| fig-width: 12
 #| fig-height: 4
 
 band_order <- c("1", "2", "3", "4-5", "6-10", "11+")
@@ -437,186 +762,421 @@ band_order <- c("1", "2", "3", "4-5", "6-10", "11+")
 svc_plot <- svc_dist %>%
   mutate(
     n_services_band = factor(n_services_band, levels = band_order),
-    country         = label_country(country)
+    country         = label_country(country),
+    pct_label       = str_c(round(pct * 100, 1), "%")
   )
 
 ggplot(svc_plot, aes(x = n_services_band, y = pct, fill = country)) +
-  geom_col(alpha = 0.85) +
-  facet_wrap(~ country, ncol = 2) +
+  geom_col(alpha = .8) +
+  geom_text(aes(label = pct_label), vjust = -.9, colour = "#1F303F", size = 4.5) +
+  facet_grid(cols = vars(country)) +
   scale_fill_country(guide = "none") +
-  scale_y_continuous(labels = percent_format(accuracy = 1)) +
-  labs(x = "Services received", y = NULL,
-       caption = "Total services per registered client, all time.")
+  scale_y_continuous(
+    labels = percent_format(accuracy = 1),
+    expand = expansion(mult = c(0, 0.15))
+  ) +
+  labs(x = NULL, y = NULL) +
+  theme(
+    axis.text.x = element_text(size = 14),
+    axis.text.y = element_text(size = 14),
+    strip.text = element_text(size = 16)
+  )
 ```
-
----
 
 ## Services
 
 ```{r services-value-boxes}
 #| output: asis
-stat_row(
-  stat_box(comma(n_services_total), "Total services delivered",
-           accent = "#444444"),
-  stat_box(comma(n_services_ecu),   "Services in Ecuador",
-           accent = pal_country["Ecuador"]),
-  stat_box(comma(n_services_per),   "Services in Peru",
-           accent = pal_country["Peru"]),
-  stat_box(percent(syphilis_positivity, accuracy = 0.1), "Syphilis positivity",
-           sub = "Peru 5.9% · Ecuador 1.8%", accent = "#E53935")
+vbox_row(
+  vbox("Total services", comma(n_services_total)),
+  vbox(
+    "Ecuador \U0001F1EA\U0001F1E8",
+    comma(n_services_ecu),
+    bg = col_rgba(pal_country["Ecuador"])
+  ),
+  vbox(
+    "Peru \U0001F1F5\U0001F1EA",
+    comma(n_services_per),
+    bg = col_rgba(pal_country["Peru"])
+  ),
+  vbox(
+    "Mexico \U0001F1F2\U0001F1FD",
+    comma(n_services_mex),
+    bg = col_rgba(pal_country["Mexico"])
+  )
 )
 ```
 
----
+The IRC delivers services across three clinical domains: primary care, sexual and reproductive health (SRH), and mental health. Primary care is the highest-volume service across all three countries, with SRH services close behind. Mental health is smaller in absolute numbers but represents a significant investment relative to caseload size — the cost-per-client of psychosocial support is higher than a primary care consultation, and the need is acute in displacement-affected populations.
+
+The Sankey chart below shows how each service type breaks down into sub-services, and how those sub-services are distributed across countries. Hover over any node or flow to see the exact counts. Nodes can be dragged to rearrange the layout if any labels overlap.
+
+#### Figure 7. Preponderance of services in different countries
+
+::: {.chart-sub}
+Sankey chart · service type to sub-service to country — hover or drag nodes
+:::
+```{r chart-service-sankey}
+svc_labels <- c(aps = "Primary care", ssr = "Sexual & reproductive health", sm = "Mental health")
+
+sub_labels <- c(
+  atencion_recuperativa                                    = "Curative",
+  atencion_preventiva                                      = "Preventive",
+  planificacin_familiar                                    = "Family planning",
+  planificacion_familiar                                   = "Family planning",
+  its                                                      = "STI services",
+  atencin_prenatal                                         = "Prenatal care",
+  atencion_prenatal                                        = "Prenatal care",
+  despistaje_de_cancer                                     = "Cancer screening",
+  consejera_en_ssr                                         = "SRH counselling",
+  vbg                                                      = "GBV support",
+  atencin_psicsocial_basada_en_la_comunidad                = "Community-based",
+  atencin_psicosocial_focalizada                           = "Focused psychosocial",
+  atencin_especializada_referencia_a_atencin_especializada = "Specialised / referral"
+)
+
+clean <- svc_sankey %>%
+  mutate(
+    svc_label = svc_labels[service],
+    sub_label = sub_labels[sub_service],
+    country   = case_when(
+      str_to_title(country) == "Ecuador" ~ "Ecuador \U0001F1EA\U0001F1E8",
+      str_to_title(country) == "Peru" ~ "Peru \U0001F1F5\U0001F1EA",
+      str_to_title(country) == "Mexico" ~ "Mexico \U0001F1F2\U0001F1FD",
+      TRUE ~ str_to_title(country)
+    )
+  ) %>%
+  filter(!is.na(svc_label), !is.na(sub_label))
+
+links <- bind_rows(
+  clean %>% group_by(source = svc_label, target = sub_label) %>% summarise(value = sum(n), .groups = "drop"),
+  clean %>% group_by(source = sub_label, target = country)   %>% summarise(value = sum(n), .groups = "drop")
+)
+
+svc_nodes  <- c("Primary care", "Sexual & reproductive health", "Mental health")
+ctry_nodes <- unique(clean$country)
+sub_nodes  <- setdiff(unique(links$source), svc_nodes)
+
+col_lookup <- c("Primary care" = col_aps, "Sexual & reproductive health" = col_ssr, "Mental health" = col_mh)
+ctry_name_map <- c(
+  "Ecuador \U0001F1EA\U0001F1E8" = "Ecuador",
+  "Peru \U0001F1F5\U0001F1EA"    = "Peru",
+  "Mexico \U0001F1F2\U0001F1FD"  = "Mexico"
+)
+col_lookup[ctry_nodes] <- unname(pal_country[ctry_name_map[ctry_nodes]])
+
+all_nodes <- tibble(name = unique(c(links$source, links$target)))
+
+node_vol <- bind_rows(links %>% rename(name = source), links %>% rename(name = target)) %>%
+  group_by(name) %>% summarise(vol = sum(value), .groups = "drop")
+
+y_map <- all_nodes %>%
+  left_join(node_vol, by = "name") %>%
+  mutate(col = case_when(name %in% svc_nodes ~ 0L, name %in% sub_nodes ~ 1L, TRUE ~ 2L)) %>%
+  group_by(col) %>%
+  arrange(desc(vol), .by_group = TRUE) %>%
+  mutate(y_ctr = { v <- vol / sum(vol); cumsum(v) - v / 2 }) %>%
+  ungroup() %>%
+  { setNames(.$y_ctr, .$name) }
+
+node_colour <- function(nm) unname(coalesce(col_lookup[nm], col_sub))
+node_x      <- function(nm) if (nm %in% svc_nodes) 0.05 else if (nm %in% ctry_nodes) 0.82 else 0.32
+
+nodes_list <- lapply(all_nodes$name, function(nm) {
+  nd <- list(name = nm, x = node_x(nm), y = unname(y_map[nm]),
+             itemStyle = list(color = node_colour(nm)))
+  if (nm %in% svc_nodes)
+    nd$label <- list(position = "left", align = "right", fontSize = 15, fontWeight = "bold")
+  if (nm == "Sexual & reproductive health")
+    nd$label <- list(position = "left", align = "right", fontSize = 15, fontWeight = "bold",
+                     formatter = "Sexual &\nreproductive health")
+  if (nm %in% ctry_nodes)
+    nd$label <- list(fontSize = 15, fontWeight = "bold")
+  nd
+})
+
+links_list <- lapply(seq_len(nrow(links)), function(i)
+  list(source = links$source[[i]], target = links$target[[i]], value = links$value[[i]]))
+
+e_charts(width = "100%", height = "520px") |>
+  e_list(list(
+    series = list(list(
+      type      = "sankey",
+      layout    = "none",
+      orient    = "horizontal",
+      left      = "22%",
+      right     = "12%",
+      top       = "8%",
+      bottom    = "5%",
+      data      = nodes_list,
+      links     = links_list,
+      label     = list(fontFamily = "Inter", fontSize = 12, color = "#333333"),
+      lineStyle = list(opacity = 0.45)
+    )),
+    tooltip   = list(trigger = "item", textStyle = list(fontFamily = "Inter", fontSize = 12)),
+    textStyle = list(fontFamily = "Inter"),
+#    title     = list(list(
+#      text      = "IRC service portfolio — Ecuador, Peru & Mexico",
+#      textStyle = list(fontFamily = "Inter", fontSize = 14, fontWeight = "bold")
+#    )),
+    legend = list(show = FALSE)
+  ))
+```
 
 ### Section 2: Primary care
 
-#### Top 10 diagnoses by country
+The bump chart below tracks the ranking of the top five primary care diagnoses by quarter, with dot size reflecting the volume of cases. A diagnosis that stays at #1 across every quarter tells you something important about underlying community need; one that rises and falls is worth watching.
 
-Ecuador's top diagnoses reflect a settled community caseload (parasitosis, UTI, cold). Peru's prominence of child health checks (Z00.1) and headache suggests a different service model — more health surveillance in a transit population with limited prior care.
+Ecuador's ranking is notably stable — parasitosis has held the top spot for most of the programme, with UTI a consistent second. These are conditions driven by water quality and sanitation access, which change slowly. Peru shows more movement at the top, with child health checks and headache alternating in the leading position; this variability is consistent with a transit caseload that is still being characterised as the programme matures. Mexico is not shown here because diagnosis coding only began in November 2025; once several full quarters are available it will be added.
 
-```{r chart-2-1}
+#### Figure 8. What are the top five primary care diagnoses?
+
+::: {.chart-sub}
+Bump chart · quarterly rank among top 5 diagnoses per country · dot size = volume
+:::
+```{r chart-2-2}
+#| fig-width: 10
+#| fig-height: 13
+
+quarterly_ranks <- aps_trend_ctry %>%
+  mutate(
+    date    = as.Date(paste0(year_month, "-01")),
+    quarter = paste0(year(date), " Q", quarter(date))
+  ) %>%
+  group_by(country, quarter, diagnosis_code, diagnosis_label) %>%
+  summarise(n = sum(n), .groups = "drop") %>%
+  group_by(country, quarter) %>%
+  mutate(rank = dense_rank(desc(n))) %>%
+  ungroup() %>%
+  mutate(
+    country  = label_country(country),
+    dx_label = label_dx(diagnosis_code, diagnosis_label),
+    q_date   = as.Date(paste0(
+      str_extract(quarter, "[0-9]{4}"), "-",
+      sprintf("%02d", (as.integer(str_extract(quarter, "[0-9]$")) - 1L) * 3L + 1L),
+      "-01"
+    ))
+  )
+
+# Assign colours from teal ramp, ordered by global volume
+aps_dx_order <- quarterly_ranks %>%
+  group_by(diagnosis_code, dx_label) %>%
+  summarise(total = sum(n), .groups = "drop") %>%
+  arrange(desc(total)) %>%
+  mutate(colour = pal_aps_dx[row_number()])
+
+# Named lookup by label (for bump chart) and by code (for marimekko)
+aps_colour_by_label <- setNames(aps_dx_order$colour, aps_dx_order$dx_label)
+aps_colour_by_code  <- setNames(aps_dx_order$colour, aps_dx_order$diagnosis_code)
+
+quarterly_ranks <- quarterly_ranks %>%
+  left_join(aps_dx_order %>% select(dx_label, colour), by = "dx_label")
+
+# Break ties using previous quarter's rank
+quarterly_ranks <- quarterly_ranks %>%
+  arrange(country, dx_label, q_date) %>%
+  group_by(country, dx_label) %>%
+  mutate(prev_rank = lag(rank, default = 99L)) %>%
+  ungroup() %>%
+  group_by(country, q_date) %>%
+  mutate(rank = rank(rank + prev_rank * 0.01, ties.method = "first")) %>%
+  ungroup()
+
+aps_max_q_date <- max(quarterly_ranks$q_date)
+
+ends <- quarterly_ranks %>%
+  group_by(country, dx_label) %>%
+  slice_max(q_date, n = 1) %>%
+  ungroup() %>%
+  mutate(end_label = paste0(dx_label, "  (", comma(n), ")"))
+
+quarterly_ranks <- quarterly_ranks %>%
+  mutate(
+    tooltip = paste0(
+      "<b>", dx_label, "</b><br>",
+      country, " · Q", quarter(q_date), " ", year(q_date), "<br>",
+      "Rank #", rank, " · ", comma(n), " diagnoses (quarter total)"
+    )
+  )
+
+p_aps_bump <- ggplot(quarterly_ranks, aes(q_date, rank, group = dx_label, colour = colour)) +
+  geom_line(linewidth = 0.9) +
+  geom_point_interactive(
+    aes(size = n, tooltip = tooltip, data_id = paste(country, dx_label, q_date)),
+    alpha = 0.85
+  ) +
+  ggrepel::geom_text_repel(
+    data          = ends,
+    aes(label     = end_label),
+    hjust         = 0,
+    nudge_x       = 20,
+    xlim          = c(aps_max_q_date, NA),
+    size          = 3.5,
+    family        = "Inter",
+    fontface      = "bold",
+    direction     = "y",
+    segment.size  = 0.3,
+    segment.color = "grey70",
+    show.legend   = FALSE
+  ) +
+  scale_colour_identity() +
+  scale_size_area(max_size = 10, name = "Diagnoses", labels = comma) +
+  scale_y_reverse(breaks = 1:5, labels = paste0("#", 1:5), minor_breaks = seq(1.5, 4.5, 1)) +
+  scale_x_date(
+    labels  = function(x) paste0("Q", quarter(x), " '", substr(year(x), 3, 4)),
+    expand  = expansion(mult = c(0.02, 0.28))
+  ) +
+  facet_wrap(~country, ncol = 1) +
+  labs(x = NULL, y = NULL) +
+  theme(
+    legend.position    = "bottom",
+    panel.spacing      = unit(1.4, "cm"),
+    panel.grid.minor.y = element_line(colour = "grey92", linewidth = 0.25),
+    strip.text         = element_text(size = 14, face = "bold", margin = margin(b = 12)),
+    axis.text.x        = element_text(family = "Inter", size = 12),
+    axis.text.y        = element_text(size = 12)
+  )
+
+girafe(
+  ggobj      = p_aps_bump,
+  width_svg  = 10,
+  height_svg = 13,
+  options    = list(
+    opts_hover(css = "stroke:white;stroke-width:1.5px;"),
+    opts_hover_inv(css = "opacity:0.2;"),
+    opts_tooltip(
+      css = "background:white;border:1px solid #ccc;border-radius:4px;padding:8px 10px;font-family:Inter,sans-serif;font-size:13px;line-height:1.5;"
+    )
+  )
+)
+```
+
+This chart compares the primary care diagnosis mix between host community clients and migrant/refugee clients. It uses a Marimekko layout: within each panel, bar *width* reflects the relative size of each population group's caseload, and bar *height* reflects the share of diagnoses within that group. A wider bar means that group generates more consultations overall; a taller segment within a bar means that diagnosis is more prominent for that group.
+
+In Ecuador — where both groups are sizeable — this comparison is particularly informative. In Peru, the migrant caseload substantially outweighs the host community caseload, which is reflected in the column widths. Hover over any segment for exact counts and percentages.
+
+#### Figure 9. Do migrants and host community present with different conditions?
+
+::: {.chart-sub}
+Marimekko chart · bar width = caseload size · bar height = diagnosis share · hover for detail
+:::
+```{r chart-2-4}
 #| fig-width: 10
 #| fig-height: 5.5
 
-dx_top10 <- aps_dx %>%
-  mutate(dx_label = label_dx(diagnosis_code, diagnosis_label)) %>%
-  group_by(country) %>%
-  slice_max(n, n = 10) %>%
-  mutate(
-    dx_label = reorder(dx_label, n),
-    country  = label_country(country)
-  ) %>%
-  ungroup()
-
-ggplot(dx_top10, aes(x = n, y = dx_label, fill = country)) +
-  geom_col(alpha = 0.85) +
-  facet_wrap(~ country, ncol = 2, scales = "free") +
-  scale_fill_country(guide = "none") +
-  scale_x_continuous(labels = comma) +
-  labs(x = "Consultations", y = NULL,
-       caption = "Top 10 diagnoses per country by total consultation count.")
-```
-
-#### Diagnoses by age band
-
-```{r chart-2-2}
-#| fig-width: 11
-#| fig-height: 13
-
-age_order <- c("0-5","6-11","12-17","18-49","50+")
-
-dx_by_age <- aps_age %>%
-  mutate(
-    dx_label = label_dx(diagnosis_code, diagnosis_label),
-    age_band = factor(age_band, levels = age_order),
-    country  = label_country(country)
-  ) %>%
-  group_by(country, age_band) %>%
-  slice_max(n, n = 5) %>%
-  mutate(dx_label = reorder_within(dx_label, n, list(country, age_band))) %>%
-  ungroup()
-
-ggplot(dx_by_age, aes(x = n, y = dx_label, fill = country)) +
-  geom_col(alpha = 0.85) +
-  facet_grid(age_band ~ country, scales = "free") +
-  scale_fill_country(guide = "none") +
-  scale_y_reordered() +
-  scale_x_continuous(labels = comma) +
-  labs(x = "Consultations", y = NULL,
-       caption = "Top 5 diagnoses per country and age band.") +
-  theme(axis.text.y  = element_text(size = 8),
-        strip.text.y = element_text(size = 9))
-```
-
-#### Chronic conditions
-
-Among the 44% of clients with chronic conditions data, hypertension and diabetes account for the majority of named conditions. The high share of `otro_cronico` reflects free-text entries that were redacted at anonymisation.
-
-```{r chart-2-3}
-#| fig-width: 8
-#| fig-height: 4
-
-chronic_plot <- chronic %>%
-  mutate(
-    cond_label = coalesce(chronic_labels[condition], condition),
-    cond_label = reorder(cond_label, n),
-    country    = label_country(country)
-  )
-
-ggplot(chronic_plot, aes(x = pct, y = cond_label, fill = country)) +
-  geom_col(alpha = 0.85) +
-  facet_wrap(~ country, ncol = 2, scales = "free_y") +
-  scale_fill_country(guide = "none") +
-  scale_x_continuous(labels = percent_format(accuracy = 0.1)) +
-  labs(x = NULL, y = NULL,
-       caption = "% of clients with chronic conditions data (44% of total). Clients may have more than one condition.")
-```
-
-#### Diagnoses: host community vs migrants
-
-```{r chart-2-4}
-#| fig-width: 10
-#| fig-height: 7
-
-eq_plot <- equity_dx %>%
+mekko_df <- equity_dx %>%
   mutate(
     dx_label  = label_dx(diagnosis_code, diagnosis_label),
-    pop_label = coalesce(pop_labels[population_group], population_group),
-    country   = label_country(country)
+    dx_colour = coalesce(aps_colour_by_code[diagnosis_code], "#BBBBBB"),
+    country_l = label_country(country),
+    pop_label = pop_labels[population_group]
   ) %>%
-  group_by(country, pop_label) %>%
-  mutate(dx_label = reorder_within(dx_label, n, list(country, pop_label))) %>%
+  group_by(country_l, pop_label) %>%
+  mutate(group_total = sum(n), pct = n / group_total) %>%
+  arrange(country_l, pop_label, n) %>%
+  mutate(y_end = cumsum(pct), y_start = y_end - pct) %>%
   ungroup()
 
-ggplot(eq_plot, aes(x = n, y = dx_label, fill = country)) +
-  geom_col(alpha = 0.85) +
-  facet_grid(pop_label ~ country, scales = "free") +
-  scale_fill_country(guide = "none") +
-  scale_y_reordered() +
-  scale_x_continuous(labels = comma) +
-  labs(x = "Consultations", y = NULL,
-       caption = "Top 5 diagnoses per country and population group.") +
-  theme(axis.text.y = element_text(size = 8))
+col_pos <- mekko_df %>%
+  distinct(country_l, pop_label, group_total) %>%
+  group_by(country_l) %>%
+  arrange(pop_label, .by_group = TRUE) %>%
+  mutate(x_end = cumsum(group_total), x_start = x_end - group_total,
+         x_mid = (x_start + x_end) / 2) %>%
+  ungroup()
+
+mekko_df <- mekko_df %>%
+  left_join(select(col_pos, country_l, pop_label, x_start, x_end, x_mid),
+            by = c("country_l", "pop_label"))
+
+mekko_pal <- mekko_df %>% distinct(dx_label, dx_colour) %>% { setNames(.$dx_colour, .$dx_label) }
+
+mekko_df <- mekko_df %>%
+  mutate(
+    tooltip = paste0(
+      "<b>", dx_label, "</b><br>",
+      comma(n), " cases · ", percent(pct, accuracy = 1),
+      " of ", pop_label, " consultations"
+    )
+  )
+
+p_aps_mekko <- ggplot(mekko_df) +
+  geom_rect_interactive(
+    aes(
+      xmin    = x_start,
+      xmax    = x_end,
+      ymin    = y_start,
+      ymax    = y_end,
+      fill    = dx_label,
+      tooltip = tooltip,
+      data_id = paste(country_l, pop_label, dx_label)
+    ),
+    colour    = "white",
+    linewidth = 0.4
+  ) +
+  geom_text(
+    aes(x = x_mid, y = (y_start + y_end) / 2, label = n),
+    colour   = "white",
+    fontface = "bold",
+    size     = 3.0,
+    family   = "Inter"
+  ) +
+  geom_text(
+    data        = col_pos,
+    aes(x = x_mid, y = -0.04, label = pop_label),
+    inherit.aes = FALSE,
+    size        = 3.2,
+    family      = "Inter",
+    vjust       = 1
+  ) +
+  scale_x_continuous(expand = c(0.01, 0)) +
+  scale_y_continuous(
+    labels = percent_format(accuracy = 1),
+    breaks = c(0, .25, .5, .75, 1),
+    expand = c(0, 0)
+  ) +
+  scale_fill_manual(values = mekko_pal, name = NULL) +
+  facet_grid(cols = vars(country_l), scales = "free_x", space = "free_x") +
+  coord_cartesian(clip = "off") +
+  labs(x = NULL, y = NULL) +
+  theme(
+    legend.position = "bottom",
+    legend.key.size = unit(0.4, "cm"),
+    strip.text = element_text(size = 14, face = "bold", margin = margin(b = 12)),
+    strip.clip = "off",
+    panel.spacing.x = unit(0.6, "cm"),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    plot.margin = margin(t = 5, r = 5, b = 20, l = 5)
+  )
+
+girafe(
+  ggobj = p_aps_mekko,
+  width_svg = 10,
+  height_svg = 5.5,
+  options = list(
+    opts_hover(css = "opacity:1;stroke:white;stroke-width:1.5px;"),
+    opts_hover_inv(css = "opacity:0.25;"),
+    opts_tooltip(
+      css = "background:white;border:1px solid #ccc;border-radius:4px;padding:8px 10px;font-family:Inter,sans-serif;font-size:13px;line-height:1.5;"
+    )
+  )
+)
 ```
 
----
+------------------------------------------------------------------------
 
 ### Section 3: Sexual and reproductive health
 
-#### SSR service mix
+Sexual and reproductive health services form a core part of the health package across all three countries. Displacement and transit amplify SRH risks: access to contraception is disrupted, exposure to gender-based violence is elevated, and antenatal care that began in one country often cannot be continued in another. IRC's SRH presence in these communities fills a gap that formal health systems frequently cannot.
 
-```{r chart-3-1}
-#| fig-width: 7
-#| fig-height: 4
+ITS/STI testing results are available for Ecuador and Peru. Syphilis positivity is **`r percent(syphilis_positivity, accuracy = 0.1)`** combined. Peru (5.9%) is substantially higher than Ecuador (1.8%) — a clinically significant difference. A positivity rate above 5% is the WHO threshold for a generalised epidemic, placing Peru at that boundary among clients who present for testing. The chart shows test volume (n=) alongside positivity rate; small sample sizes for Hepatitis B mean those figures should be read with caution.
 
-ssr_labels <- c(
-  planificacin_familiar = "Family planning",
-  atencin_prenatal      = "Prenatal care",
-  its                   = "ITS/STI",
-  despistaje_de_cancer  = "Cancer screening",
-  vbg                   = "GBV services",
-  consejera_en_ssr      = "SSR counselling"
-)
+#### Figure 10. Sexual health screening outcomes
 
-ssr_plot <- ssr_mix %>%
-  mutate(
-    service_label = coalesce(ssr_labels[ssr_tipo], ssr_tipo),
-    country       = label_country(country)
-  )
-
-ggplot(ssr_plot, aes(x = country, y = pct, fill = service_label)) +
-  geom_col(alpha = 0.85) +
-  scale_fill_manual(values = pal_service, name = NULL) +
-  scale_y_continuous(labels = percent_format(accuracy = 1)) +
-  labs(x = NULL, y = NULL,
-       caption = "Proportion of SSR consultations by service type.") +
-  theme(legend.position = "right")
-```
-
-#### ITS/STI testing and positivity
-
-Syphilis positivity is **`r percent(syphilis_positivity, accuracy = 0.1)`** combined. Peru (5.9%) is substantially higher than Ecuador (1.8%) — a clinically significant difference with implications for testing protocols and treatment supply.
+::: {.chart-sub}
+Bar chart · STI test positivity rate by condition and country (Ecuador & Peru only)
+:::
 
 ```{r chart-3-2}
 #| fig-width: 8
@@ -642,143 +1202,381 @@ ggplot(its_plot, aes(x = condition_label, y = positivity_rate, fill = country)) 
        caption = "n = number tested. Hepatitis B sample sizes are small — interpret with caution.")
 ```
 
-#### Family planning method mix
+`r percent(pct_prenatal_under18, accuracy = 1)` of prenatal clients are under 18 — a figure that immediately triggers safeguarding protocols. Adolescent pregnancy in a displacement context carries compounded risk: higher exposure to GBV, disrupted family networks, restricted mobility, and interrupted access to antenatal care. For many of these young women, the IRC is the only provider they can reach. The dot chart below shows the age distribution of prenatal clients by country; highlighted dots mark the under-18 age bands. Dot size reflects the number of clients in each band.
 
-*Data not available.* The `fp_corta` (short-acting) and `fp_larga` (long-acting) fields are empty across the full EPR dataset. Family planning consultations are counted in the SSR service mix above; method breakdown pending field-name investigation.
+#### Figure 11. Age profile of antenatal clients
 
-#### Prenatal care: age profile
-
-`r percent(pct_prenatal_under18, accuracy = 1)` of prenatal clients are under 18.
+::: {.chart-sub}
+Bubble matrix · prenatal clients by age band and country
+:::
 
 ```{r chart-3-4}
 #| fig-width: 7
 #| fig-height: 4
 
-age_order    <- c("0-5","6-11","12-17","18-49","50+")
-age_display  <- c("0–5","6–11","12–17","18–49","50+")
-names(age_display) <- age_order
+age_order   <- c("<10","10-14","15-17","18-19","20-24","25-29",
+                 "30-34","35-39","40-44","45-49","50+")
+age_display <- c("<10" = "<10", "10-14" = "10–14", "15-17" = "15–17",
+                 "18-19" = "18–19", "20-24" = "20–24", "25-29" = "25–29",
+                 "30-34" = "30–34", "35-39" = "35–39", "40-44" = "40–44",
+                 "45-49" = "45–49", "50+" = "50+")
 
-prenatal_plot <- prenatal_age %>%
+prenatal_pyr <- prenatal_age %>%
   mutate(
     age_band = factor(age_band, levels = age_order),
-    bar_fill = if_else(age_band %in% c("0-5","6-11","12-17"),
-                       col_highlight,
-                       pal_country[str_to_title(country)]),
+    is_u18   = age_band %in% c("<10", "10-14", "15-17"),
+    value    = if_else(country == "ecuador", -pct, pct),
+    bar_fill = case_when(
+      is_u18               ~ col_highlight,
+      country == "ecuador" ~ unname(pal_country["Ecuador"]),
+      TRUE                 ~ unname(pal_country["Peru"])
+    ),
     country  = label_country(country)
   )
 
-ggplot(prenatal_plot, aes(x = age_band, y = pct, fill = bar_fill)) +
-  geom_col(alpha = 0.85) +
-  facet_wrap(~ country, ncol = 2) +
-  scale_fill_identity() +
-  scale_x_discrete(labels = age_display) +
-  scale_y_continuous(labels = percent_format(accuracy = 1)) +
-  labs(x = NULL, y = NULL,
-       caption = "Red bars = under 18. Age at registration.")
-```
+x_pmax <- max(prenatal_pyr$pct) * 1.12
 
-#### Cervical cancer screening (CACU/IVAA)
-
-```{r chart-3-5}
-#| output: asis
-
-cacu_ecu <- cacu %>% filter(country == "ecuador")
-
-cat(paste0(
-  "**Ecuador:** ", cacu_ecu$n_screened_ivaa, " clients screened by IVAA. ",
-  "Positivity rate: ", percent(cacu_ecu$ivaa_positivity_rate, accuracy = 0.1),
-  " (", cacu_ecu$n_ivaa_positive, " positive).",
-  "\n\n",
-  "**Peru:** No IVAA screening records in current dataset. ",
-  "Confirm whether the service runs in Peru or whether the field name differs."
-))
-```
-
----
-
-### Section 4: Mental health
-
-*Mental health services are provided in Peru and Ecuador only.*
-
-#### Mental health service type
-
-```{r chart-4-1}
-#| fig-width: 8
-#| fig-height: 3.5
-
-mh_service_labels <- c(
-  atencin_psicsocial_basada_en_la_comunidad                  = "Community psychosocial",
-  atencin_psicosocial_focalizada                             = "Focused psychosocial",
-  "atencin_especializada_referencia_a_atencin_especializada" = "Specialised / referred"
-)
-
-mh_svc_plot <- mh_service %>%
+prenatal_pyr <- prenatal_pyr %>%
   mutate(
-    svc_label = coalesce(mh_service_labels[service_type], service_type),
-    svc_label = reorder(svc_label, pct),
-    country   = label_country(country)
+    tooltip = paste0(
+      "<b>", age_display[as.character(age_band)], " years</b><br>",
+      country, "<br>",
+      comma(n), " clients · ", percent(pct, accuracy = 1),
+      if_else(is_u18, "<br><i>Under 18</i>", "")
+    )
   )
 
-ggplot(mh_svc_plot, aes(x = pct, y = svc_label, fill = country)) +
-  geom_col(alpha = 0.85) +
-  facet_wrap(~ country, ncol = 2) +
-  scale_fill_country(guide = "none") +
-  scale_x_continuous(labels = percent_format(accuracy = 1)) +
+p_prenatal <- prenatal_pyr %>%
+  ggplot(aes(
+    x      = country,
+    y      = age_band,
+    colour = bar_fill
+  )) +
+  geom_point_interactive(
+    aes(
+      size    = n,
+      tooltip = tooltip,
+      data_id = paste(country, age_band)
+    ),
+    alpha = .8
+  ) +
+  scale_fill_identity(
+    guide = "legend", name = NULL,
+    breaks = c(col_highlight, unname(pal_country["Ecuador"]), unname(pal_country["Peru"])),
+    labels = c("Under 18", "Ecuador", "Peru")
+  ) +
+  scale_colour_identity(
+    guide = "legend", name = NULL,
+    breaks = c(col_highlight, unname(pal_country["Ecuador"]), unname(pal_country["Peru"])),
+    labels = c("Under 18", "Ecuador", "Peru")
+  ) +
+  scale_size_area(max_size = 15, guide = "none") +
+  scale_y_discrete(labels = age_display) +
+  labs(x = NULL, y = NULL) +
+  theme(
+    panel.grid.major = element_blank()
+  )
+
+girafe(
+  ggobj      = p_prenatal,
+  width_svg  = 7,
+  height_svg = 4,
+  options    = list(
+    opts_hover(css = "opacity:1;"),
+    opts_hover_inv(css = "opacity:0.25;"),
+    opts_tooltip(
+      css = "background:white;border:1px solid #ccc;border-radius:4px;padding:8px 10px;font-family:Inter,sans-serif;font-size:13px;line-height:1.5;"
+    )
+  )
+)
+```
+
+------------------------------------------------------------------------
+
+### Section 4: Mental health *(Ecuador and Peru only)*
+
+Mental health services are delivered through a task-sharing model, with community-based psychosocial support as the primary modality — consistent with mhGAP-aligned programming that keeps care accessible without requiring specialist staff. Mexico does not currently operate a mental health module, so the charts in this section cover Ecuador and Peru only. The diagnostic picture in both countries reflects the trauma-related conditions that are prevalent in displacement-affected populations.
+
+As with primary care, the bump chart below tracks quarterly rankings among the top five mental health diagnoses. Stability in the rankings suggests a well-understood, consistent caseload. Large shifts — a condition jumping from #4 to #1 in a single quarter — may reflect a population change, a programme expansion, or a shift in clinician recording practice worth investigating.
+
+Acute stress reaction dominates the Peru caseload, consistent with a transit population experiencing acute crisis. Ecuador's picture is more diffuse, with psychosocial and family support conditions prominent alongside clinical diagnoses — consistent with a more settled population where chronic distress, rather than acute trauma, is the primary driver.
+
+#### Figure 12. What are the top five mental health diagnoses?
+
+::: {.chart-sub}
+Bump chart · quarterly rank among top 5 MH diagnoses per country · dot size = volume
+:::
+
+```{r chart-4-1}
+#| fig-width: 10
+#| fig-height: 9
+
+mh_quarterly_ranks <- mh_trend_ctry %>%
+  mutate(
+    date    = as.Date(paste0(year_month, "-01")),
+    quarter = paste0(year(date), " Q", quarter(date))
+  ) %>%
+  filter(date >= as.Date("2025-01-01")) %>%   # exclude isolated pre-2025 data-entry outliers
+  group_by(country, quarter, diagnosis_code, diagnosis_label) %>%
+  summarise(n = sum(n), .groups = "drop") %>%
+  group_by(country, quarter) %>%
+  mutate(rank = dense_rank(desc(n))) %>%
+  ungroup() %>%
+  mutate(
+    country  = label_country(country),
+    dx_label = label_dx(diagnosis_code, diagnosis_label),
+    q_date   = as.Date(paste0(
+      str_extract(quarter, "[0-9]{4}"), "-",
+      sprintf("%02d", (as.integer(str_extract(quarter, "[0-9]$")) - 1L) * 3L + 1L),
+      "-01"
+    ))
+  )
+
+mh_dx_order <- mh_quarterly_ranks %>%
+  group_by(diagnosis_code, dx_label) %>%
+  summarise(total = sum(n), .groups = "drop") %>%
+  arrange(desc(total)) %>%
+  mutate(colour = pal_mh_dx[row_number()])
+
+mh_colour_by_label <- setNames(mh_dx_order$colour, mh_dx_order$dx_label)
+mh_colour_by_code  <- setNames(mh_dx_order$colour, mh_dx_order$diagnosis_code)
+
+mh_quarterly_ranks <- mh_quarterly_ranks %>%
+  left_join(mh_dx_order %>% select(dx_label, colour), by = "dx_label")
+
+mh_quarterly_ranks <- mh_quarterly_ranks %>%
+  arrange(country, dx_label, q_date) %>%
+  group_by(country, dx_label) %>%
+  mutate(prev_rank = lag(rank, default = 99L)) %>%
+  ungroup() %>%
+  group_by(country, q_date) %>%
+  mutate(rank = rank(rank + prev_rank * 0.01, ties.method = "first")) %>%
+  ungroup()
+
+mh_max_q_date <- max(mh_quarterly_ranks$q_date)
+
+mh_ends <- mh_quarterly_ranks %>%
+  group_by(country, dx_label) %>%
+  slice_max(q_date, n = 1) %>%
+  ungroup() %>%
+  mutate(end_label = paste0(dx_label, "  (", comma(n), ")"))
+
+mh_quarterly_ranks <- mh_quarterly_ranks %>%
+  mutate(
+    tooltip = paste0(
+      "<b>", dx_label, "</b><br>",
+      country, " · Q", quarter(q_date), " ", year(q_date), "<br>",
+      "Rank #", rank, " · ", comma(n), " diagnoses (quarter total)"
+    )
+  )
+
+p_mh_bump <- ggplot(mh_quarterly_ranks, aes(q_date, rank, group = dx_label, colour = colour)) +
+  geom_line(linewidth = 0.9) +
+  geom_point_interactive(
+    aes(size = n, tooltip = tooltip, data_id = paste(country, dx_label, q_date)),
+    alpha = 0.8
+  ) +
+  ggrepel::geom_text_repel(
+    data          = mh_ends,
+    aes(label     = end_label),
+    hjust         = 0,
+    nudge_x       = 20,
+    xlim          = c(mh_max_q_date, NA),
+    size          = 3.5,
+    family        = "Inter",
+    fontface      = "bold",
+    direction     = "y",
+    segment.size  = 0.3,
+    segment.color = "grey70",
+    show.legend   = FALSE
+  ) +
+  scale_colour_identity() +
+  scale_size_area(max_size = 10, name = "Diagnoses", labels = comma) +
+  scale_y_reverse(breaks = 1:5, labels = paste0("#", 1:5), minor_breaks = seq(1.5, 4.5, 1)) +
+  scale_x_date(
+    labels  = function(x) paste0("Q", quarter(x), " '", substr(year(x), 3, 4)),
+    expand  = expansion(mult = c(0.02, 0.28))
+  ) +
+  facet_wrap(~country, ncol = 1) +
+  labs(x = NULL, y = NULL) +
+  theme(
+    legend.position    = "bottom",
+    panel.spacing      = unit(1.4, "cm"),
+    panel.grid.minor.y = element_line(colour = "grey92", linewidth = 0.25),
+    strip.text         = element_text(size = 14, face = "bold", margin = margin(b = 8)),
+    axis.text.x        = element_text(family = "Inter", size = 12),
+    axis.text.y        = element_text(size = 12)
+  )
+
+girafe(
+  ggobj      = p_mh_bump,
+  width_svg  = 10,
+  height_svg = 9,
+  options    = list(
+    opts_hover(css = "stroke:white;stroke-width:1.5px;"),
+    opts_hover_inv(css = "opacity:0.2;"),
+    opts_tooltip(
+      css = "background:white;border:1px solid #ccc;border-radius:4px;padding:8px 10px;font-family:Inter,sans-serif;font-size:13px;line-height:1.5;"
+    )
+  )
+)
+```
+
+The same Marimekko layout used for primary care diagnoses appears here for mental health. Bar width reflects relative caseload; bar height reflects the diagnostic mix within each group. The question is whether the conditions that bring migrants to the clinic are different from those that bring host community members — and in Peru, the answer is strikingly clear.
+
+Peru's migrant caseload is dominated by acute stress reaction, at more than six times the volume of the host community caseload, and concentrated in crisis-related diagnoses. Host community clients, by contrast, present more often with anxiety and depressive conditions — the more chronic end of the mental health spectrum. This is exactly what a transit corridor model would predict: migrants arrive in acute distress; settled residents carry the accumulated burden of long-term adversity.
+
+#### Figure 13. Does the mental health picture differ between migrants and host community?
+
+::: {.chart-sub}
+Marimekko chart · bar width = caseload size · bar height = diagnosis share · hover for detail
+:::
+
+```{r chart-4-2}
+#| fig-width: 10
+#| fig-height: 5.5
+
+mh_mekko_df <- mh_equity_dx %>%
+  mutate(
+    dx_label   = label_dx(diagnosis_code, diagnosis_label),
+    dx_colour  = coalesce(mh_colour_by_code[diagnosis_code], "#CCCCCC"),
+    country_l  = label_country(country),
+    pop_label  = pop_labels[population_group]
+  ) %>%
+  group_by(country_l, pop_label) %>%
+  mutate(group_total = sum(n), pct = n / group_total) %>%
+  arrange(country_l, pop_label, n) %>%
+  mutate(y_end = cumsum(pct), y_start = y_end - pct) %>%
+  ungroup()
+
+mh_col_pos <- mh_mekko_df %>%
+  distinct(country_l, pop_label, group_total) %>%
+  group_by(country_l) %>%
+  arrange(pop_label, .by_group = TRUE) %>%
+  mutate(x_end = cumsum(group_total), x_start = x_end - group_total,
+         x_mid = (x_start + x_end) / 2) %>%
+  ungroup()
+
+mh_mekko_df <- mh_mekko_df %>%
+  left_join(select(mh_col_pos, country_l, pop_label, x_start, x_end, x_mid),
+            by = c("country_l", "pop_label"))
+
+mh_mekko_pal <- mh_mekko_df %>%
+  distinct(dx_label, dx_colour) %>%
+  { setNames(.$dx_colour, .$dx_label) }
+
+mh_mekko_df <- mh_mekko_df %>%
+  mutate(
+    tooltip = paste0(
+      "<b>", dx_label, "</b><br>",
+      comma(n), " cases · ", percent(pct, accuracy = 1),
+      " of ", pop_label, " consultations"
+    )
+  )
+
+p_mh_mekko <- ggplot(mh_mekko_df) +
+  geom_rect_interactive(
+    aes(
+      xmin    = x_start,
+      xmax    = x_end,
+      ymin    = y_start,
+      ymax    = y_end,
+      fill    = dx_label,
+      tooltip = tooltip,
+      data_id = paste(country_l, pop_label, dx_label)
+    ),
+    colour    = "white",
+    linewidth = 0.4
+  ) +
+  geom_text(
+    aes(x = x_mid, y = (y_start + y_end) / 2, label = n),
+    colour   = "white",
+    fontface = "bold",
+    size     = 3.0,
+    family   = "Inter"
+  ) +
+  geom_text(
+    data        = mh_col_pos,
+    aes(x = x_mid, y = -0.04, label = pop_label),
+    inherit.aes = FALSE,
+    size        = 3.2,
+    family      = "Inter",
+    vjust       = 1,
+    angle       = 45,
+    hjust       = 1
+  ) +
+  scale_x_continuous(expand = c(0.01, 0)) +
+  scale_y_continuous(
+    labels = percent_format(accuracy = 1),
+    breaks = c(0, .25, .5, .75, 1),
+    expand = c(0, 0)
+  ) +
+  scale_fill_manual(values = mh_mekko_pal, name = NULL) +
+  facet_grid(cols = vars(country_l), scales = "free_x", space = "free_x") +
+  coord_cartesian(clip = "off") +
+  labs(x = NULL, y = NULL) +
+  theme(
+    legend.position  = "bottom",
+    legend.key.size  = unit(0.4, "cm"),
+    strip.text       = element_text(face = "bold", size = 12),
+    strip.clip       = "off",
+    panel.spacing.x  = unit(0.6, "cm"),
+    axis.text.x      = element_blank(),
+    axis.ticks.x     = element_blank(),
+    plot.margin      = margin(t = 5, r = 5, b = 130, l = 5)
+  )
+
+girafe(
+  ggobj      = p_mh_mekko,
+  width_svg  = 10,
+  height_svg = 5.5,
+  options    = list(
+    opts_hover(css = "opacity:1;stroke:white;stroke-width:1.5px;"),
+    opts_hover_inv(css = "opacity:0.25;"),
+    opts_tooltip(
+      css = "background:white;border:1px solid #ccc;border-radius:4px;padding:8px 10px;font-family:Inter,sans-serif;font-size:13px;line-height:1.5;"
+    )
+  )
+)
+```
+
+------------------------------------------------------------------------
+
+### Section 5: Pharmaceutical dispensing *(Mexico only)*
+
+Pharmaceutical dispensing records are available for Mexico only — Ecuador and Peru do not currently capture this in their data systems. The top products dispensed are a useful cross-check on the clinical picture: they should broadly reflect the primary care and SRH diagnosis mix. Analgesics, antibiotics, and contraceptives dominate, which is consistent with a programme that sees a high volume of primary care consultations and family planning services. Unexpected entries — a medication that appears far more often than the diagnosis profile would suggest — may indicate a recording issue or a community need that is not being fully captured in the consultation data.
+
+#### Figure 14. What medications are being dispensed?
+
+::: {.chart-sub}
+Bar chart · top 20 products dispensed · Mexico only
+:::
+
+```{r chart-5-1}
+#| fig-width: 8
+#| fig-height: 5
+
+pharma_plot <- pharma_mx %>%
+  mutate(product = str_replace_all(product, "_", " ") %>% str_to_sentence()) %>%
+  slice_max(n, n = 20) %>%
+  mutate(product = reorder(product, n))
+
+ggplot(pharma_plot, aes(x = n, y = product)) +
+  geom_col(fill = pal_country["Mexico"], alpha = .8) +
+  geom_text(aes(label = comma(n)), hjust = -.2, colour = "black", size = 2.5) +
+  scale_x_continuous(
+    labels = comma,
+    expand = expansion(mult = c(0, 0.2))
+  ) +
   labs(x = NULL, y = NULL)
 ```
 
-#### Top mental health diagnoses
+## Further information and resources
 
-```{r chart-4-2}
-#| fig-width: 9
-#| fig-height: 5
+For questions about the data, methodology, or client reach across Latin America, please contact:
 
-mh_top <- mh_dx %>%
-  mutate(dx_label = label_dx(diagnosis_code, diagnosis_label)) %>%
-  group_by(country) %>%
-  slice_max(n, n = 10) %>%
-  mutate(
-    dx_label = reorder(dx_label, n),
-    country  = label_country(country)
-  ) %>%
-  ungroup()
+- **Health Technical Adviser:** Bibiana Wanger
+- [**Philip Blue**](mailto:philip.blue@rescue.org), Regional Measurement Adviser, Latin America
+- **Mark Montague**, Deputy Director, MEAL
 
-ggplot(mh_top, aes(x = n, y = dx_label, fill = country)) +
-  geom_col(alpha = 0.85) +
-  facet_wrap(~ country, ncol = 2, scales = "free") +
-  scale_fill_country(guide = "none") +
-  scale_x_continuous(labels = comma) +
-  labs(x = "Consultations", y = NULL)
-```
-
-#### External referral rate
-
-```{r chart-4-3}
-#| fig-width: 5
-#| fig-height: 3
-
-ref_plot <- referrals %>% mutate(country = label_country(country))
-
-ggplot(ref_plot, aes(x = country, y = referral_rate, fill = country)) +
-  geom_col(alpha = 0.85, width = 0.5) +
-  geom_text(
-    aes(label = paste0(percent(referral_rate, accuracy = 0.1),
-                       "\n(", n_referred, " of ", comma(n_consultations), ")")),
-    vjust = -0.3, size = 3.2, family = "Inter"
-  ) +
-  scale_fill_country(guide = "none") +
-  scale_y_continuous(labels = percent_format(accuracy = 0.1),
-                     limits = c(0, max(ref_plot$referral_rate) * 1.5)) +
-  labs(x = NULL, y = "Referral rate",
-       caption = "Proportion of mental health consultations with external specialist referral.")
-```
-
----
-
-### Section 5: Pharmaceutical dispensing
-
-*Mexico pipeline not yet built. This section will be populated in a future update.*
-
----
-
-*`r last_updated_fmt` · Ecuador and Peru data only. Mexico deferred.*
+Data are drawn from IRC's CommCare health information system. Pipeline code and aggregation scripts are maintained by the MEAL team. For access to underlying aggregated data, contact Philip Blue.

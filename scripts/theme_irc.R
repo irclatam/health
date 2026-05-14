@@ -21,8 +21,10 @@ pal_country <- c(
   Peru    = "#AF59E1"
 )
 
+text_colour <- "#1F303F"
+
 scale_colour_country <- function(...) scale_colour_manual(values = pal_country, ...)
-scale_fill_country   <- function(...) scale_fill_manual(values = pal_country, ...)
+scale_fill_country <- function(...) scale_fill_manual(values = pal_country, ...)
 
 # ── Sex palette ───────────────────────────────────────────────────────────────
 # Used for population pyramids and any chart encoding sex within a panel.
@@ -30,7 +32,7 @@ scale_fill_country   <- function(...) scale_fill_manual(values = pal_country, ..
 
 pal_sex <- c(Women = "#1B7F8A", Men = "#A3CDD4", Other = "grey50")
 
-scale_fill_sex   <- function(...) scale_fill_manual(values = pal_sex, ...)
+scale_fill_sex <- function(...) scale_fill_manual(values = pal_sex, ...)
 scale_colour_sex <- function(...) scale_colour_manual(values = pal_sex, ...)
 
 # ── SSR service type palette ───────────────────────────────────────────────────
@@ -60,12 +62,12 @@ theme_irc <- function(base_size = 11) {
       axis.text.x      = element_text(family = "Roboto Mono", size = rel(0.9)),
       axis.text.y      = element_text(size = rel(0.9)),
       axis.title       = element_text(size = rel(1.0)),
-      strip.text       = element_text(size = rel(1.0), face = "bold"),
+      strip.text       = element_text(size = rel(1.0), face = "bold", colour = text_colour),
       legend.position  = "top",
       legend.title     = element_blank(),
       panel.grid.minor = element_blank(),
       panel.grid.major = element_line(colour = "grey92"),
-      plot.caption     = element_text(size = rel(0.75), colour = "grey50", hjust = 0)
+      plot.caption     = element_text(size = rel(0.75), colour = text_colour, hjust = 0)
     )
 }
 

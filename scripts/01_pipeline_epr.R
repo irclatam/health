@@ -83,6 +83,28 @@ age_band_5yr <- function(age) {
   )
 }
 
+# Unequal bands for prenatal charts: splits cleanly at the under-18 safeguarding
+# threshold and the 15–17 / 18–19 adolescent categories. Ages < 10 are treated
+# as implausible data-entry errors and returned as NA.
+age_band_prenatal <- function(age) {
+  case_when(
+    age > 100  ~ NA_character_,
+    age <  0   ~ NA_character_,
+    age < 10   ~ "<10",
+    age < 15   ~ "10-14",
+    age < 18   ~ "15-17",
+    age < 20   ~ "18-19",
+    age < 25   ~ "20-24",
+    age < 30   ~ "25-29",
+    age < 35   ~ "30-34",
+    age < 40   ~ "35-39",
+    age < 45   ~ "40-44",
+    age < 50   ~ "45-49",
+    age >= 50  ~ "50+",
+    .default   = NA_character_
+  )
+}
+
 # Normalise CommCare ICD-10 codes: uppercase, strip trailing X.
 # "j00x" -> "J00", "n390" -> "N390"
 normalise_cie10 <- function(code) {
@@ -103,7 +125,8 @@ write_agg <- function(df, filename) {
 # before submission) and build a (client_id × submission_date) lookup used to
 # enrich both service_date_validated and reg_date_validated below.
 
-svc_form_date_lookup <- read_csv("data_anonymised/ecuador_servicios_clean.csv", show_col_types = FALSE) %>%
+epr_svc_date_lookup <- read_csv("data_anonymised/ecuador_servicios_clean.csv", show_col_types = FALSE,
+                                col_types = cols(.default = col_character())) %>%
   na_dashes() %>%
   clean_names() %>%
   transmute(
@@ -121,15 +144,16 @@ svc_form_date_lookup <- read_csv("data_anonymised/ecuador_servicios_clean.csv", 
   group_by(client_id, form_date) %>%
   summarise(svc_date_validated = min(fecha_manual), .groups = "drop")
 
-cat("Service date lookup:", nrow(svc_form_date_lookup), "client-days with valid manual dates\n")
+cat("Service date lookup:", nrow(epr_svc_date_lookup), "client-days with valid manual dates\n")
 
 # ── Load: Registro de Cliente ─────────────────────────────────────────────────
 
-registro_raw <- read_csv("data_anonymised/ecuador_registro_clean.csv", show_col_types = FALSE) %>%
+epr_registro_raw <- read_csv("data_anonymised/ecuador_registro_clean.csv", show_col_types = FALSE,
+                             col_types = cols(.default = col_character())) %>%
   na_dashes() %>%
   clean_names()
 
-registro <- registro_raw %>%
+epr_registro <- epr_registro_raw %>%
   select(
     case_id = case_id,
     fecha_registro = fecha_de_registro,
@@ -151,7 +175,9 @@ registro <- registro_raw %>%
     reg_system = as.Date(substr(reg_system, 1, 10)),
     year_month = format(fecha_registro, "%Y-%m"),
     edad = as.numeric(edad),
-    age_band = age_band(edad),
+    age_band         = age_band(edad),
+    age_5yr          = age_band_5yr(edad),
+    age_band_prenatal = age_band_prenatal(edad),
     etnia = coalesce(str_to_lower(etnia_ecu), str_to_lower(etnia_per)),
     perfil_migratorio = str_to_lower(perfil_migratorio) %>%
       str_replace_all("[áà]", "a") %>% str_replace_all("[éè]", "e") %>%
@@ -160,12 +186,14 @@ registro <- registro_raw %>%
   ) %>%
   select(-etnia_ecu, -etnia_per)
 
-cat("Registro:", nrow(registro), "rows —",
-    sum(registro$country == "ecuador", na.rm = TRUE), "Ecuador,",
-    sum(registro$country == "peru", na.rm = TRUE), "Peru\n")
+rm(epr_registro_raw)
+
+cat("Registro:", nrow(epr_registro), "rows —",
+    sum(epr_registro$country == "ecuador", na.rm = TRUE), "Ecuador,",
+    sum(epr_registro$country == "peru", na.rm = TRUE), "Peru\n")
 
 # Country lookup used to propagate country into servicios and historia
-country_lookup <- registro %>% select(case_id, country)
+epr_country_lookup <- epr_registro %>% select(case_id, country)
 
 # ── Load: Agregar Servicios (service cases) ───────────────────────────────────
 # Using the servicios_salud case export (one row per individual service) rather
@@ -173,17 +201,19 @@ country_lookup <- registro %>% select(case_id, country)
 # services from an Oct 2024–Feb 2025 download gap; cases are the authoritative
 # source. The referido field is not available per-service in the case export.
 
-servicios_raw <- read_csv("data_anonymised/ecuador_servicios_cases_clean.csv", show_col_types = FALSE) %>%
+epr_servicios_raw <- read_csv("data_anonymised/ecuador_servicios_cases_clean.csv", show_col_types = FALSE,
+                              col_types = cols(.default = col_character())) %>%
   na_dashes() %>%
   clean_names()
 
-servicios <- servicios_raw %>%
+epr_servicios <- epr_servicios_raw %>%
   select(
     case_id           = indices_cliente_salud,
     fecha_atencion    = opened_date,
     servicio          = service_name,
     dx_aps_1          = diagnos_principal,
     dx_aps_2          = diagnos_segundario,
+    aps_tipo          = tipo_atn_primaria,
     ssr_tipo,
     fp_corta          = metd_corta_anticonceptivo,
     fp_larga          = mtd_larga_anticonceptivo,
@@ -198,8 +228,8 @@ servicios <- servicios_raw %>%
     referido       = NA_character_,
     fecha_atencion = as.Date(fecha_atencion)
   ) %>%
-  left_join(country_lookup, by = "case_id") %>%
-  left_join(svc_form_date_lookup,
+  left_join(epr_country_lookup, by = "case_id") %>%
+  left_join(epr_svc_date_lookup,
             by = c("case_id" = "client_id", "fecha_atencion" = "form_date")) %>%
   mutate(
     service_date_validated = as.Date(coalesce(svc_date_validated, fecha_atencion)),
@@ -216,19 +246,21 @@ servicios <- servicios_raw %>%
   ) %>%
   select(-svc_date_validated)
 
-cat("Servicios:", nrow(servicios), "rows\n")
+rm(epr_servicios_raw)
+
+cat("Servicios:", nrow(epr_servicios), "rows\n")
 
 # ── Derive reg_date_validated ─────────────────────────────────────────────────
 # Use the earliest service_date_validated for each client if it pre-dates their
 # registration system timestamp; otherwise keep reg_system. reg_system is the
 # form completed_time — reliable and complete but reflects submission not visit.
 
-earliest_svc <- servicios %>%
+epr_earliest_svc <- epr_servicios %>%
   group_by(case_id) %>%
   summarise(earliest_svc = min(service_date_validated, na.rm = TRUE), .groups = "drop")
 
-registro <- registro %>%
-  left_join(earliest_svc, by = "case_id") %>%
+epr_registro <- epr_registro %>%
+  left_join(epr_earliest_svc, by = "case_id") %>%
   mutate(
     reg_date_validated = as.Date(if_else(
       !is.na(earliest_svc) & earliest_svc < reg_system,
@@ -239,36 +271,40 @@ registro <- registro %>%
   select(-earliest_svc)
 
 cat("reg_date_validated: ",
-    sum(registro$reg_date_validated < registro$reg_system, na.rm = TRUE),
+    sum(epr_registro$reg_date_validated < epr_registro$reg_system, na.rm = TRUE),
     "clients shifted earlier,",
-    sum(format(registro$reg_date_validated, "%Y-%m") != format(registro$reg_system, "%Y-%m"), na.rm = TRUE),
+    sum(format(epr_registro$reg_date_validated, "%Y-%m") != format(epr_registro$reg_system, "%Y-%m"), na.rm = TRUE),
     "change month\n")
 
 # ── Load: Cliente Salud cases (chronic conditions) ────────────────────────────
 # patologias_cronicas is a space-delimited multi-select on the cliente_salud
 # case — not available in the registration form export. Joined here via caseid.
 
-clientes_cases_raw <- read_csv("data_anonymised/ecuador_clientes_cases_clean.csv", show_col_types = FALSE) %>%
+clientes_cases_raw <- read_csv("data_anonymised/ecuador_clientes_cases_clean.csv", show_col_types = FALSE,
+                               col_types = cols(.default = col_character())) %>%
   na_dashes() %>%
   clean_names()
 
-patologias_lookup <- clientes_cases_raw %>%
+epr_patologias_lookup <- clientes_cases_raw %>%
   select(case_id = caseid, patologias_cronicas) %>%
   filter(!is.na(patologias_cronicas))
 
-registro <- registro %>%
-  left_join(patologias_lookup, by = "case_id")
+rm(clientes_cases_raw)
 
-cat("patologias_cronicas: ", sum(!is.na(registro$patologias_cronicas)), "clients with data (",
-    round(100 * mean(!is.na(registro$patologias_cronicas)), 1), "%)\n")
+epr_registro <- epr_registro %>%
+  left_join(epr_patologias_lookup, by = "case_id")
+
+cat("patologias_cronicas: ", sum(!is.na(epr_registro$patologias_cronicas)), "clients with data (",
+    round(100 * mean(!is.na(epr_registro$patologias_cronicas)), 1), "%)\n")
 
 # ── Load: Historia Clinica ────────────────────────────────────────────────────
 
-historia_raw <- read_csv("data_anonymised/ecuador_historia_clinica_clean.csv", show_col_types = FALSE) %>%
+epr_historia_raw <- read_csv("data_anonymised/ecuador_historia_clinica_clean.csv", show_col_types = FALSE,
+                             col_types = cols(.default = col_character())) %>%
   na_dashes() %>%
   clean_names()
 
-historia <- historia_raw %>%
+epr_historia <- epr_historia_raw %>%
   select(
     formid,
     case_id = form_case_case_id,
@@ -285,32 +321,34 @@ historia <- historia_raw %>%
     # patologias_cronicas blanked by 'antecedentes' PII pattern — re-run
     # 00_anonymise_ecuador.R after fix to recover this field.
   ) %>%
-  left_join(country_lookup, by = "case_id") %>%
+  left_join(epr_country_lookup, by = "case_id") %>%
   mutate(
     fecha_hc = as.Date(fecha_hc),
     year_month = format(fecha_hc, "%Y-%m")
   )
 
-cat("Historia:", nrow(historia), "rows\n")
+rm(epr_historia_raw)
+
+cat("Historia:", nrow(epr_historia), "rows\n")
 
 # ── Join: add demographics to service visits and historia ─────────────────────
 # form.case.@case_id in servicios and historia is the parent cliente_salud
 # case ID, matching case_id in registro. Confirmed via UUID overlap test.
 
-demo_slim <- registro %>% select(case_id, country, age_band, perfil_migratorio, etnia)
+epr_demo_slim <- epr_registro %>% select(case_id, country, age_band, age_5yr, age_band_prenatal, perfil_migratorio, etnia)
 
-servicios_demo <- servicios %>%
+epr_servicios_demo <- epr_servicios %>%
   select(-country) %>%
-  left_join(demo_slim, by = "case_id")
+  left_join(epr_demo_slim, by = "case_id")
 
-historia_demo <- historia %>%
+epr_historia_demo <- epr_historia %>%
   select(-country) %>%
-  left_join(demo_slim, by = "case_id")
+  left_join(epr_demo_slim, by = "case_id")
 
 # ── Section 1: Who we're reaching ─────────────────────────────────────────────
 
 # Chart 1.1 — Consultations over time
-agg_monthly_consultations <- servicios %>%
+agg_monthly_consultations <- epr_servicios %>%
   filter(!is.na(year_month), !is.na(country)) %>%
   count(country, year_month) %>%
   rename(n_consultations = n)
@@ -318,7 +356,7 @@ agg_monthly_consultations <- servicios %>%
 write_agg(agg_monthly_consultations, "agg_monthly_consultations.csv")
 
 # Chart 1.2 — Sex breakdown
-agg_sex_breakdown <- registro %>%
+agg_sex_breakdown <- epr_registro %>%
   mutate(sexo = case_when(
     is.na(sexo) ~ "Otro",
     sexo == "I" ~ "Otro",
@@ -336,7 +374,7 @@ agg_sex_breakdown <- registro %>%
 write_agg(agg_sex_breakdown, "agg_sex_breakdown.csv")
 
 # Chart 1.3 — Age band distribution
-agg_age_breakdown <- registro %>%
+agg_age_breakdown <- epr_registro %>%
   filter(!is.na(age_band), !is.na(country)) %>%
   count(country, age_band) %>%
   group_by(country) %>%
@@ -347,23 +385,23 @@ write_agg(agg_age_breakdown, "agg_age_breakdown.csv")
 
 # Chart 1.3 (pyramid) — Age × sex in 5-year bands
 # Denominator is total M+F per country so both bars share a common scale.
-mf_totals <- registro %>%
+epr_mf_totals <- epr_registro %>%
   filter(sexo %in% c("H", "M"), !is.na(edad), !is.na(country)) %>%
   count(country, name = "total_mf")
 
-agg_age_sex_pyramid <- registro %>%
+agg_age_sex_pyramid <- epr_registro %>%
   filter(sexo %in% c("H", "M"), !is.na(edad), !is.na(country)) %>%
   mutate(age_5yr = age_band_5yr(edad)) %>%
   filter(!is.na(age_5yr)) %>%
   count(country, sexo, age_5yr) %>%
-  left_join(mf_totals, by = "country") %>%
+  left_join(epr_mf_totals, by = "country") %>%
   mutate(pct = n / total_mf) %>%
   select(-total_mf)
 
 write_agg(agg_age_sex_pyramid, "agg_age_sex_pyramid.csv")
 
 # Chart 1.4 — Migration profile
-agg_migration_profile <- registro %>%
+agg_migration_profile <- epr_registro %>%
   filter(!is.na(perfil_migratorio), !is.na(country)) %>%
   count(country, migration_profile = perfil_migratorio) %>%
   group_by(country) %>%
@@ -374,7 +412,7 @@ agg_migration_profile <- registro %>%
 write_agg(agg_migration_profile, "agg_migration_profile.csv")
 
 # Chart 1.5 — Ethnic profile (Ecuador and Peru; Mexico does not collect this)
-agg_ethnic_profile <- registro %>%
+agg_ethnic_profile <- epr_registro %>%
   filter(!is.na(etnia), !is.na(country)) %>%
   count(country, ethnic_profile = etnia) %>%
   group_by(country) %>%
@@ -394,7 +432,7 @@ nationality_labels <- c(
   doble_nacionalidad = "Dual nationality"
 )
 
-agg_nationality <- registro %>%
+agg_nationality <- epr_registro %>%
   filter(!is.na(nacionalidad), !is.na(country)) %>%
   mutate(nacionalidad = str_to_lower(nacionalidad)) %>%
   count(country, nacionalidad) %>%
@@ -406,11 +444,11 @@ agg_nationality <- registro %>%
 write_agg(agg_nationality, "agg_nationality.csv")
 
 # Chart 1.7 — Services per client distribution
-svc_counts <- servicios %>%
+epr_svc_counts <- epr_servicios %>%
   filter(!is.na(case_id), !is.na(country)) %>%
   count(country, case_id, name = "n_services")
 
-agg_services_per_client <- svc_counts %>%
+agg_services_per_client <- epr_svc_counts %>%
   mutate(n_services_band = case_when(
     n_services == 1 ~ "1",
     n_services == 2 ~ "2",
@@ -424,7 +462,7 @@ agg_services_per_client <- svc_counts %>%
   mutate(pct = n / sum(n)) %>%
   ungroup()
 
-agg_services_per_client_summary <- svc_counts %>%
+agg_services_per_client_summary <- epr_svc_counts %>%
   group_by(country) %>%
   summarise(
     n_clients      = n(),
@@ -440,23 +478,23 @@ write_agg(agg_services_per_client_summary, "agg_services_per_client_summary.csv"
 # ── Section 2: APS clinical picture ───────────────────────────────────────────
 
 # Stack primary and secondary diagnoses into long format (shared by 2.1, 2.2, 7.3)
-aps_long <- bind_rows(
-  servicios_demo %>% select(country, year_month, age_band, perfil_migratorio,
-                            diagnosis_code = dx_aps_1_code, diagnosis_label = dx_aps_1_label),
-  servicios_demo %>% select(country, year_month, age_band, perfil_migratorio,
-                            diagnosis_code = dx_aps_2_code, diagnosis_label = dx_aps_2_label)
+epr_aps_long <- bind_rows(
+  epr_servicios_demo %>% select(country, year_month, age_band, perfil_migratorio,
+                                diagnosis_code = dx_aps_1_code, diagnosis_label = dx_aps_1_label),
+  epr_servicios_demo %>% select(country, year_month, age_band, perfil_migratorio,
+                                diagnosis_code = dx_aps_2_code, diagnosis_label = dx_aps_2_label)
 ) %>%
   filter(!is.na(diagnosis_code), !is.na(country))
 
 # Chart 2.1 — Top APS diagnoses by country
-agg_aps_diagnoses <- aps_long %>%
+agg_aps_diagnoses <- epr_aps_long %>%
   count(country, diagnosis_code, diagnosis_label) %>%
   arrange(country, desc(n))
 
 write_agg(agg_aps_diagnoses, "agg_aps_diagnoses.csv")
 
 # Chart 2.2 — Top diagnoses by age band
-agg_aps_by_age <- aps_long %>%
+agg_aps_by_age <- epr_aps_long %>%
   filter(!is.na(age_band)) %>%
   count(country, age_band, diagnosis_code, diagnosis_label) %>%
   group_by(country, age_band) %>%
@@ -469,37 +507,53 @@ write_agg(agg_aps_by_age, "agg_aps_by_age.csv")
 # Chart 2.3 — Chronic conditions prevalence
 # Denominator = clients with any patologias_cronicas data (not those with "ninguna")
 # pct = proportion of clients with data who have each condition
-chronic_base <- registro %>%
+epr_chronic_base <- epr_registro %>%
   filter(!is.na(country), !is.na(patologias_cronicas)) %>%
   count(country, name = "n_with_data")
 
-agg_chronic_conditions <- registro %>%
+agg_chronic_conditions <- epr_registro %>%
   filter(!is.na(country), !is.na(patologias_cronicas)) %>%
   separate_longer_delim(patologias_cronicas, delim = " ") %>%
   filter(patologias_cronicas != "ninguna") %>%
   count(country, condition = patologias_cronicas) %>%
-  left_join(chronic_base, by = "country") %>%
+  left_join(epr_chronic_base, by = "country") %>%
   mutate(pct = n / n_with_data) %>%
   arrange(country, desc(n))
 
 write_agg(agg_chronic_conditions, "agg_chronic_conditions.csv")
 
 # Chart 7.3 — Top 5 APS diagnoses trend over time (top 5 across all countries)
-top5_aps <- aps_long %>%
+epr_top5_aps <- epr_aps_long %>%
   count(diagnosis_code, diagnosis_label) %>%
   slice_max(n, n = 5) %>%
   pull(diagnosis_code)
 
-agg_aps_trend <- aps_long %>%
-  filter(diagnosis_code %in% top5_aps, !is.na(year_month)) %>%
+agg_aps_trend <- epr_aps_long %>%
+  filter(diagnosis_code %in% epr_top5_aps, !is.na(year_month)) %>%
   count(country, year_month, diagnosis_code, diagnosis_label)
 
 write_agg(agg_aps_trend, "agg_aps_trend.csv")
 
+# Bump chart — top 5 APS diagnoses per country (country-specific ranking)
+epr_top5_by_country <- epr_aps_long %>%
+  filter(!is.na(year_month)) %>%
+  count(country, diagnosis_code, diagnosis_label) %>%
+  group_by(country) %>%
+  slice_max(n, n = 5) %>%
+  ungroup() %>%
+  select(country, diagnosis_code)
+
+agg_aps_trend_ctry <- epr_aps_long %>%
+  filter(!is.na(year_month)) %>%
+  count(country, year_month, diagnosis_code, diagnosis_label) %>%
+  semi_join(epr_top5_by_country, by = c("country", "diagnosis_code"))
+
+write_agg(agg_aps_trend_ctry, "agg_aps_trend_ctry.csv")
+
 # ── Section 3: Sexual and reproductive health ──────────────────────────────────
 
 # Chart 3.1 — SSR service mix
-agg_ssr_service_mix <- servicios %>%
+agg_ssr_service_mix <- epr_servicios %>%
   filter(str_detect(coalesce(servicio, ""), "ssr"), !is.na(ssr_tipo), !is.na(country)) %>%
   separate_longer_delim(ssr_tipo, delim = " ") %>%
   filter(ssr_tipo != "") %>%
@@ -512,7 +566,7 @@ agg_ssr_service_mix <- servicios %>%
 write_agg(agg_ssr_service_mix, "agg_ssr_service_mix.csv")
 
 # Chart 3.2 / 7.2 — ITS testing and positivity
-its_long <- historia_demo %>%
+epr_its_long <- epr_historia_demo %>%
   select(country, year_month, case_id, perfil_migratorio,
          sifilis = sifilis_resultado,
          vih = vih_resultado,
@@ -525,14 +579,14 @@ its_long <- historia_demo %>%
   ) %>%
   filter(tested)
 
-agg_its_results <- its_long %>%
+agg_its_results <- epr_its_long %>%
   group_by(country, condition) %>%
   summarise(n_tested = n(), n_positive = sum(positive), .groups = "drop") %>%
   mutate(positivity_rate = n_positive / n_tested)
 
 write_agg(agg_its_results, "agg_its_results.csv")
 
-agg_its_by_month <- its_long %>%
+agg_its_by_month <- epr_its_long %>%
   filter(!is.na(year_month)) %>%
   group_by(country, condition, year_month) %>%
   summarise(n_tested = n(), n_positive = sum(positive), .groups = "drop") %>%
@@ -542,12 +596,12 @@ write_agg(agg_its_by_month, "agg_its_by_month.csv")
 
 # Chart 3.3 — Family planning method mix
 agg_fp_methods <- bind_rows(
-  servicios %>%
+  epr_servicios %>%
     filter(!is.na(fp_corta), !is.na(country)) %>%
     separate_longer_delim(fp_corta, delim = " ") %>%
     filter(fp_corta != "") %>%
     transmute(country, duration = "corta_duracion", method = fp_corta),
-  servicios %>%
+  epr_servicios %>%
     filter(!is.na(fp_larga), !is.na(country)) %>%
     separate_longer_delim(fp_larga, delim = " ") %>%
     filter(fp_larga != "") %>%
@@ -559,17 +613,18 @@ agg_fp_methods <- bind_rows(
 write_agg(agg_fp_methods, "agg_fp_methods.csv")
 
 # Chart 3.4 — Prenatal clients by age band
-agg_prenatal_age <- servicios_demo %>%
-  filter(str_detect(coalesce(servicio, ""), "ssr"), !is.na(prenatal), !is.na(country)) %>%
-  count(country, age_band) %>%
+agg_prenatal_age <- epr_servicios_demo %>%
+  filter(str_detect(coalesce(servicio, ""), "ssr"), !is.na(prenatal), !is.na(country), !is.na(age_band_prenatal)) %>%
+  count(country, age_band_prenatal) %>%
   group_by(country) %>%
   mutate(pct = n / sum(n)) %>%
-  ungroup()
+  ungroup() %>%
+  rename(age_band = age_band_prenatal)
 
 write_agg(agg_prenatal_age, "agg_prenatal_age.csv")
 
 # Chart 3.5 — CACU screening stat callout
-agg_cacu_screening <- historia %>%
+agg_cacu_screening <- epr_historia %>%
   filter(!is.na(ivaa_resultado), !is.na(country)) %>%
   group_by(country) %>%
   summarise(
@@ -582,7 +637,7 @@ agg_cacu_screening <- historia %>%
 write_agg(agg_cacu_screening, "agg_cacu_screening.csv")
 
 # Chart 6.3 — Pregnant <18 by population group
-agg_prenatal_by_population <- servicios_demo %>%
+agg_prenatal_by_population <- epr_servicios_demo %>%
   filter(
     str_detect(coalesce(servicio, ""), "ssr"), !is.na(prenatal),
     !is.na(country), !is.na(perfil_migratorio), !is.na(age_band)
@@ -604,7 +659,7 @@ agg_prenatal_by_population <- servicios_demo %>%
 write_agg(agg_prenatal_by_population, "agg_prenatal_by_population.csv")
 
 # Chart 7.4 — Pregnant <18 proportion over time
-agg_prenatal_trend <- servicios_demo %>%
+agg_prenatal_trend <- epr_servicios_demo %>%
   filter(
     str_detect(coalesce(servicio, ""), "ssr"), !is.na(prenatal),
     !is.na(country), !is.na(year_month), !is.na(age_band)
@@ -623,7 +678,7 @@ write_agg(agg_prenatal_trend, "agg_prenatal_trend.csv")
 # ── Section 4: Mental health ───────────────────────────────────────────────────
 
 # Chart 4.1 — Mental health service type
-agg_mh_service_type <- servicios %>%
+agg_mh_service_type <- epr_servicios %>%
   filter(str_detect(coalesce(servicio, ""), "sm"), !is.na(sm_tipo), !is.na(country)) %>%
   separate_longer_delim(sm_tipo, delim = " ") %>%
   filter(sm_tipo != "") %>%
@@ -636,20 +691,70 @@ agg_mh_service_type <- servicios %>%
 write_agg(agg_mh_service_type, "agg_mh_service_type.csv")
 
 # Chart 4.2 — Top mental health diagnoses
-sm_long <- bind_rows(
-  servicios %>% select(country, year_month, diagnosis_code = dx_sm_1_code, diagnosis_label = dx_sm_1_label),
-  servicios %>% select(country, year_month, diagnosis_code = dx_sm_2_code, diagnosis_label = dx_sm_2_label)
+epr_sm_long <- bind_rows(
+  epr_servicios_demo %>% select(country, year_month, perfil_migratorio, diagnosis_code = dx_sm_1_code, diagnosis_label = dx_sm_1_label),
+  epr_servicios_demo %>% select(country, year_month, perfil_migratorio, diagnosis_code = dx_sm_2_code, diagnosis_label = dx_sm_2_label)
 ) %>%
   filter(!is.na(diagnosis_code), !is.na(country))
 
-agg_mh_diagnoses <- sm_long %>%
+agg_mh_diagnoses <- epr_sm_long %>%
   count(country, diagnosis_code, diagnosis_label) %>%
   arrange(country, desc(n))
 
 write_agg(agg_mh_diagnoses, "agg_mh_diagnoses.csv")
 
+# Bump chart — top MH diagnoses per country (trend over time)
+epr_top5_mh_by_country <- epr_sm_long %>%
+  filter(!is.na(year_month)) %>%
+  count(country, diagnosis_code, diagnosis_label) %>%
+  group_by(country) %>%
+  slice_max(n, n = 5) %>%
+  ungroup() %>%
+  select(country, diagnosis_code)
+
+agg_mh_trend_ctry <- epr_sm_long %>%
+  filter(!is.na(year_month)) %>%
+  count(country, year_month, diagnosis_code, diagnosis_label) %>%
+  semi_join(epr_top5_mh_by_country, by = c("country", "diagnosis_code"))
+
+write_agg(agg_mh_trend_ctry, "agg_mh_trend_ctry.csv")
+
+# Marimekko — MH diagnoses by population group (host community vs migrant/refugee)
+agg_mh_equity_diagnoses <- epr_sm_long %>%
+  filter(!is.na(perfil_migratorio)) %>%
+  mutate(population_group = if_else(
+    perfil_migratorio == "poblacion_acogida", "local_host", "migrant_refugee"
+  )) %>%
+  count(country, population_group, diagnosis_code, diagnosis_label) %>%
+  group_by(country, population_group) %>%
+  slice_max(n, n = 5) %>%
+  ungroup() %>%
+  arrange(country, population_group, desc(n))
+
+write_agg(agg_mh_equity_diagnoses, "agg_mh_equity_diagnoses.csv")
+
+# Sankey — service × sub-service × country
+epr_aps_sankey <- epr_servicios %>%
+  filter(str_detect(coalesce(servicio, ""), "aps"), !is.na(aps_tipo), !is.na(country)) %>%
+  transmute(country, service = "aps", sub_service = aps_tipo)
+
+epr_ssr_sankey <- epr_servicios %>%
+  filter(str_detect(coalesce(servicio, ""), "ssr"), !is.na(ssr_tipo), !is.na(country)) %>%
+  mutate(sub_service = word(ssr_tipo, 1)) %>%
+  transmute(country, service = "ssr", sub_service)
+
+epr_mh_sankey <- epr_servicios %>%
+  filter(str_detect(coalesce(servicio, ""), "sm"), !is.na(sm_tipo), !is.na(country)) %>%
+  transmute(country, service = "sm", sub_service = sm_tipo)
+
+agg_service_sankey <- bind_rows(epr_aps_sankey, epr_ssr_sankey, epr_mh_sankey) %>%
+  count(country, service, sub_service) %>%
+  arrange(service, sub_service, country)
+
+write_agg(agg_service_sankey, "agg_service_sankey.csv")
+
 # Chart 4.3 — Mental health referrals
-agg_referrals <- servicios %>%
+agg_referrals <- epr_servicios %>%
   filter(str_detect(coalesce(servicio, ""), "sm"), !is.na(country)) %>%
   group_by(country) %>%
   summarise(
@@ -664,7 +769,7 @@ write_agg(agg_referrals, "agg_referrals.csv")
 # ── Section 6: Equity lens ────────────────────────────────────────────────────
 
 # Chart 6.1 — Top diagnoses: migrant vs local
-agg_equity_diagnoses <- aps_long %>%
+agg_equity_diagnoses <- epr_aps_long %>%
   filter(!is.na(perfil_migratorio)) %>%
   mutate(population_group = if_else(
     perfil_migratorio == "poblacion_acogida",
@@ -680,7 +785,7 @@ agg_equity_diagnoses <- aps_long %>%
 write_agg(agg_equity_diagnoses, "agg_equity_diagnoses.csv")
 
 # Chart 6.2 — ITS positivity by population group
-agg_its_by_population <- its_long %>%
+agg_its_by_population <- epr_its_long %>%
   filter(!is.na(perfil_migratorio)) %>%
   mutate(population_group = if_else(
     perfil_migratorio == "poblacion_acogida",
@@ -696,21 +801,21 @@ write_agg(agg_its_by_population, "agg_its_by_population.csv")
 # ── Section 7: Trends ─────────────────────────────────────────────────────────
 
 # Chart 7.1 — Migration profile over time
-agg_migration_by_month <- registro %>%
+agg_migration_by_month <- epr_registro %>%
   filter(!is.na(perfil_migratorio), !is.na(year_month), !is.na(country)) %>%
   count(country, year_month, migration_profile = perfil_migratorio)
 
 write_agg(agg_migration_by_month, "agg_migration_by_month.csv")
 
 # Chart 7.5 — Mental health caseload over time
-agg_mh_by_month <- servicios %>%
+agg_mh_by_month <- epr_servicios %>%
   filter(str_detect(coalesce(servicio, ""), "sm"), !is.na(year_month), !is.na(country)) %>%
   count(country, year_month, name = "n_mh_consultations")
 
 write_agg(agg_mh_by_month, "agg_mh_by_month.csv")
 
 # ── Chart 0.1: Location consultations (map) ───────────────────────────────────
-agg_location_consultations <- registro %>%
+agg_location_consultations <- epr_registro %>%
   filter(!is.na(municipio), !is.na(country)) %>%
   count(country, municipio, name = "n_clients") %>%
   arrange(country, desc(n_clients))
@@ -724,4 +829,4 @@ writeLines(
   "data/last_updated.txt"
 )
 
-cat("\nDone.\n")
+cat("\nEPR pipeline done.\n")

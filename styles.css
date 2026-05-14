@@ -1,0 +1,224 @@
+/* ----- Fonts ----- */
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Serif:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Overpass:ital,wght@0,400;0,500;0,600;0,700;0,900;1,400;1,500;1,600;1,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500&display=swap');
+
+/* ----- Typography ----- */
+body {
+  font-family: 'Inter', sans-serif;
+  font-weight: 400;
+  font-size: 15px;
+  line-height: 1.6;
+  color: #1A1A1A;
+  background-color: #ffffff;
+}
+
+/* ----- Headings ----- */
+h1 {
+  font-family: 'Roboto Serif', serif;
+  font-weight: 600;
+  color: #111111;
+  line-height: 1.4;
+  margin-top: 2.5rem;
+  margin-bottom: 0.75rem;
+}
+
+h2 {
+  font-family: 'Overpass', sans-serif;
+  font-weight: 900;
+  font-size: 1.5rem;
+  color: #111111;
+  line-height: 1.3;
+  margin-top: 2.5rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 2px solid #f0f0f0;
+  padding-bottom: 0.4rem;
+}
+
+h3 {
+  font-family: 'Overpass', sans-serif;
+  font-weight: 700;
+  font-size: 1.2rem;
+  color: #111111;
+  line-height: 1.3;
+  margin-top: 2rem;
+  margin-bottom: 0.5rem;
+}
+
+h4, h5, h6 {
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  color: #333333;
+  line-height: 1.3;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+h4 { font-size: 1.0rem; }
+
+/* Document title */
+.quarto-title h1.title {
+  font-family: 'Overpass', sans-serif;
+  font-weight: 900;
+  font-size: 2rem;
+  line-height: 1.3;
+  margin-bottom: 0.5rem;
+  color: #111111;
+  text-align: center;
+}
+
+.quarto-title {
+  text-align: center;
+}
+
+/* Document subtitle */
+.quarto-title .subtitle {
+  font-family: 'Roboto Serif', serif;
+  font-style: italic;
+  font-size: 1.1rem;
+  font-weight: 400;
+  line-height: 1.5;
+  color: #555555;
+  margin-bottom: 1.5rem;
+}
+
+/* ----- Layout: constrain content width ----- */
+/* Keeps the reading column narrow even on wide screens */
+.quarto-content {
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+/* Figures can breathe a bit wider than the text */
+.quarto-figure img,
+.cell-output-display img {
+  max-width: 100%;
+  height: auto;
+  margin: 1.5rem auto;
+  display: block;
+}
+
+/* ----- TOC (right sidebar) ----- */
+#TOC {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: #555555;
+}
+
+#TOC a {
+  color: #555555;
+  text-decoration: none;
+}
+
+#TOC a:hover,
+#TOC a.active {
+  color: #111111;
+}
+
+/* ----- Navbar ----- */
+.navbar {
+  background-color: #ffffff !important;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.navbar a,
+.navbar-brand,
+.navbar-nav .nav-link {
+  color: #111111 !important;
+}
+
+.navbar .brand-logo img {
+  height: 38px;
+  width: auto;
+}
+
+/* ----- Paragraphs ----- */
+p {
+  margin-bottom: 1.1rem;
+}
+
+/* ----- Links ----- */
+a {
+  color: #1D6FA5;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* ----- Code ----- */
+pre, code {
+  font-family: 'Roboto Mono', monospace;
+  background-color: #F6F6F6;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.88rem;
+}
+
+/* ----- Figure captions ----- */
+figure {
+  margin: 1.5rem 0;
+}
+
+figcaption,
+.figure-caption,
+.caption {
+  font-size: 0.82rem;
+  font-family: 'Inter', sans-serif;
+  font-style: italic;
+  color: #666666;
+  margin-top: 0.4rem;
+  line-height: 1.5;
+}
+
+/* ----- Callout: freshness / metadata line ----- */
+.freshness-line {
+  font-size: 0.85rem;
+  color: #888888;
+  font-family: 'Inter', sans-serif;
+  margin-bottom: 1.5rem;
+}
+
+/* ----- Horizontal rule ----- */
+hr {
+  border: none;
+  border-top: 1px solid #eeeeee;
+  margin: 2rem 0;
+}
+
+/* ----- Figure subtitle (chart type · reading note) ----- */
+.chart-sub {
+  font-family: 'Inter', sans-serif;
+  font-weight: 400;
+  font-size: 0.84rem;
+  color: #888888;
+  margin-top: -0.35rem;
+  margin-bottom: 1rem;
+}
+
+.chart-sub p { margin-bottom: 0; }
+
+/* ----- Tables ----- */
+table {
+  font-size: 0.9rem;
+  font-family: 'Inter', sans-serif;
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+}
+
+th {
+  background-color: #f5f5f5;
+  font-weight: 600;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 2px solid #dddddd;
+  text-align: left;
+}
+
+td {
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid #eeeeee;
+}
